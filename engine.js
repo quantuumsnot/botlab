@@ -118,15 +118,15 @@ var gameEngine = {
 };
 var mapData = {sizeX: 512, sizeY: 512};
 var targets = [ //for testing we are using a racetrack shaped like '8' symbol with 7 points
-  {x: 256, y: 84, z: 256}, //1 start finish point
+  {x: 256, y: 84, z: 128}, //1 start finish point
   {x: 338, y: 168, z: 256}, //2
-  {x: 256, y: 256, z: 256}, //3 middle point
+  {x: 256, y: 256, z: 512}, //3 middle point
   {x: 168, y: 338, z: 256}, //4
-  {x: 256, y: 428, z: 256}, //5
+  {x: 256, y: 428, z: 128}, //5
   {x: 338, y: 338, z: 256}, //6
-  {x: 256, y: 256, z: 256}, //7 middle point
+  {x: 256, y: 256, z: 512}, //7 middle point
   {x: 168, y: 168, z: 256}, //8
-  {x: 256, y: 84, z: 256} //9 start finish point
+  {x: 256, y: 84, z: 128} //9 start finish point
 ];
 var targetCount = targets.length;
 
@@ -136,10 +136,11 @@ for (var a = 0; a < targetCount; a++) {
   if (a === 8) continue;
   var tmpdiffX = Math.abs(targets[a].x - targets[a+1].x);
   var tmpdiffY = Math.abs(targets[a].y - targets[a+1].y);
-  var tmpLength = parseFloat(Math.hypot(tmpdiffX, tmpdiffY).toFixed(3));
+  var tmpdiffZ = Math.abs(targets[a].z - targets[a+1].z);
+  var tmpLength = parseFloat(Math.hypot(tmpdiffX, tmpdiffY, tmpdiffZ).toFixed(3));
   gameEngine.racetrackLength += tmpLength;
 }
-console.log("Racetrack length was calculated - " + gameEngine.racetrackLength + " meters");
+console.log("Racetrack length was calculated - " + parseFloat(gameEngine.racetrackLength).toFixed(3) + " meters");
 
 //Disabled for now
 /*var mapTexture = new Image();
@@ -147,8 +148,8 @@ mapTexture.src = "maptexture_test1.png";*/
 
 // this is the parent Bot object
 var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
-  this.position = {x: 0, y: 0, z: 0};
-  this.destination = {x: 0, y: 0, z: 0};
+  this.position = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
+  this.destination = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.distance = 0; //in m
   this.distanceTravelled = 0; //in m
   this.altitude = this.position.z; //in m
@@ -196,20 +197,24 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   //set starting position to be equal for each bot
   this.startPosDiffX = Math.abs(targets[1].x - targets[0].x);
   this.startPosDiffY = Math.abs(targets[1].y - targets[0].y);
-  this.startPosDistance = (Math.hypot(this.startPosDiffX, this.startPosDiffY));
+  this.startPosDiffZ = Math.abs(targets[1].z - targets[0].z);
+  this.startPosDistance = (Math.hypot(this.startPosDiffX, this.startPosDiffY, this.startPosDiffZ));
+  
   if (this.startPosDistance > 0) {
     this.startPosDiffX = this.startPosDiffX / this.startPosDistance;
     this.startPosDiffY = this.startPosDiffY / this.startPosDistance;
+    this.startPosDiffZ = this.startPosDiffZ / this.startPosDistance;
   }
-  this.startPosAngle = Math.atan2(this.startPosDiffY, this.startPosDiffX) * (180 / Math.PI);
+  this.startPosAngle = Math.atan2(this.startPosDiffY, this.startPosDiffX) * (180 / Math.PI); //Y must be the first parameter!!!
   this.heading = this.startPosAngle;
   this.position.x = targets[0].x + (gameEngine.targetSize) * Math.cos(this.startPosAngle / (180 * Math.PI));
   this.position.y = targets[0].y + (gameEngine.targetSize) * Math.sin(this.startPosAngle / (180 * Math.PI));
+  this.position.z = targets[0].z + (gameEngine.targetSize) * Math.sin(this.startPosAngle / (180 * Math.PI));
   
   //find distance between bot and first target so we can substract it from bot's overall distance travelled
-  this.distanceBeforeFirstTarget = Math.hypot(Math.abs(this.position.x - targets[0].x), Math.abs(this.position.y - targets[0].y));
-  
-  delete this.startPosDiffX; delete this.startPosDiffY; delete this.startPosDistance; delete this.startPosAngle;
+  this.distanceBeforeFirstTarget = Math.hypot(Math.abs(this.position.x - targets[0].x), Math.abs(this.position.y - targets[0].y), Math.abs(this.position.z - targets[0].z));
+  //some var cleaning, idk if this is usefull
+  delete this.startPosDiffX; delete this.startPosDiffY; delete this.startPosDiffZ; delete this.startPosDistance; delete this.startPosAngle;
   /* ------------------------------------------------------------------------ */
 
   this.updateBot = function() {
@@ -236,70 +241,83 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
         this.isTimed = false; //stops the stopwatch for our bot
         this.state = false; //sets state of our bot to inactive
         gameEngine.runningBots--; //removes our bot from the list with active bots
+        return; //maybe it's better to early exit from the function, execution of the conditions below is useless
       }
     
-      //set destination coords for our bot
-      if (this.hasTarget === false) {
+      //set destination coords for our bot only once for each destination
+      if (this.hasTarget === false && this.state === true) {
         this.hasTarget = true;
         this.destination.x = targets[this.target].x;
         this.destination.y = targets[this.target].y;
+        this.destination.z = targets[this.target].z;
       }
       
       //calculate the difference between current position and destination for each axis
-      var diffX = this.destination.x - this.position.x;
-      var diffY = this.destination.y - this.position.y;
-   
-      //calculates distance between our bot and it's current destination
-      //IMPORTANT - DO NOT REMOVE ~~ or bots stuck in checkpoints
-      this.distance = ~~(Math.hypot(diffX, diffY)); //perf tests show that using ~~ the code is 8% faster
+      if (this.state === true) {
+        var diffX = this.destination.x - this.position.x;
+        var diffY = this.destination.y - this.position.y;
+        var diffZ = this.destination.z - this.position.z;
+     
+        //calculates distance between our bot and it's current destination
+        //IMPORTANT - DO NOT REMOVE ~~ FROM HERE or bots stuck in checkpoints
+        this.distance = ~~(Math.hypot(diffX, diffY, diffZ)); //perf tests show that using ~~ the code is 8% faster
 
-      //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
-      if (this.distance > 0) {
-        diffX = diffX / this.distance;
-        diffY = diffY / this.distance;
-      }
-      
-      //checks if our bot is still away from the target, remove jitter with 1 instead of 0
-      //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
-      if (this.distance > 1) {
-        //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
-        var targetAngle = Math.atan2(diffY, diffX) * (180 / Math.PI);
-        
-        //controls direction and turning speed of our bot, turning speed 0.1667 is one minute or 1/60 degree
-        if (this.heading > targetAngle) {
-          this.heading -= (gameEngine.timeScale / 0.1667); //using timeScale here should be fixed, this always gives 0.1
-        } else if (this.heading < targetAngle) {
-          this.heading += (gameEngine.timeScale / 0.1667);
+        //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
+        if (this.distance > 0) {
+          diffX = diffX / this.distance;
+          diffY = diffY / this.distance;
+          diffZ = diffZ / this.distance;
         }
         
-        //moves our bot
-        var vx = diffX * this.acceleration;
-        var vy = diffY * this.acceleration;
-        //var dragX = -0.5 * gameEngine.airDensity * Math.pow(vx, 2) * this.dragCoeff * this.frontalArea;
-        //var dragY = -0.5 * gameEngine.airDensity * Math.pow(vy, 2) * this.dragCoeff * this.frontalArea;
-        //dragX = (isNaN(dragX) ? 0 : dragX);
-        //dragY = (isNaN(dragY) ? 0 : dragY);
-        this.position.x += vx; //minus aerodynamic drag and gravity
-        this.position.y += vy; 
-        
-        //calculates current speed and travelled distance of our bot
-        var tmp = (Math.hypot(vx, vy)); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
-        this.distanceTravelled += tmp;
-        this.speed = (tmp / gameEngine.timeStep); //V = S / t, in m/s
-        //this console.log below is interesting
-        //seems current speed of the bot (to be precise distance travelled) and its acceleration based on aero formula thrust / mass ...
-        //... are not equal or almost equal, ie the speed is between 5 and 30% bigger
-        //console.log("bot " + i + " - " + this.acceleration + " | vxvy - " + Math.hypot(vx, vy));
-      } else {
-        if (this.target < targetCount - 1) { //checks if our bot has more targets
-          this.hasTarget = false;
-          this.target++;
-        } else { //or if hasn't ...
-          this.isTimed = false; //stops the stopwatch for our bot
-          this.state = false; //sets state of our bot to inactive
-          this.hasTarget = false;
-          this.distanceTravelled -= this.distanceBeforeFirstTarget;
-          gameEngine.runningBots--; //removes our bot from the list with active bots
+        //checks if our bot is still away from the target, remove jitter with 1 instead of 0
+        //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
+        if (this.distance > 1) {
+          //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
+          var targetAngle = Math.atan2(diffY, diffX) * (180 / Math.PI);
+          
+          //controls direction and turning speed of our bot, turning speed 0.1667 is one minute or 1/60 degree
+          if (this.heading > targetAngle) {
+            this.heading -= (gameEngine.timeScale / 0.1667); //using timeScale here should be fixed, this always gives 0.1
+          } else if (this.heading < targetAngle) {
+            this.heading += (gameEngine.timeScale / 0.1667);
+          }
+          
+          //moves our bot
+          var vx = diffX * this.acceleration;
+          var vy = diffY * this.acceleration;
+          var vz = diffZ * this.acceleration;
+          //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
+          var dragX = -0.5 * gameEngine.airDensity * Math.pow(vx, 2) * this.dragCoeff * this.frontalArea;
+          var dragY = -0.5 * gameEngine.airDensity * Math.pow(vy, 2) * this.dragCoeff * this.frontalArea;
+          var dragZ = -0.5 * gameEngine.airDensity * Math.pow(vz, 2) * this.dragCoeff * this.frontalArea;
+          dragX = (isNaN(dragX) ? 0 : dragX);
+          dragY = (isNaN(dragY) ? 0 : dragY);
+          dragZ = (isNaN(dragZ) ? 0 : dragZ);
+          this.position.x += vx + (vx / dragX); //minus aerodynamic drag (dragX)
+          this.position.y += vy + (vy / dragY); //minus aerodynamic drag (dragY)
+          this.position.z += vz + (vz / dragZ) - 0.5*gameEngine.gravity*gameEngine.timeStep*gameEngine.timeStep; //minus gravity (gameEngine.gravity)
+          
+          //calculates current speed and travelled distance of our bot
+          var tmp = (Math.hypot(vx, vy, vz)); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
+          this.distanceTravelled += tmp;
+          this.speed = (tmp / gameEngine.timeStep); //V = S / t, in m/s
+          this.altitude = this.position.z;
+          //this console.log below is interesting
+          //seems current speed of the bot (to be precise distance travelled) and its acceleration based on aero formula thrust / mass ...
+          //... are not equal or almost equal, ie the speed is between 5 and 50% bigger than usual ...
+          //... or maybe the gameEngine.dTime is not correct, dunno why
+          //console.log("bot " + i + " - " + this.acceleration + " | vxvyvz - " + Math.hypot(vx, vy, vz));
+        } else {
+          if (this.target < targetCount - 1) { //checks if our bot has more targets
+            this.hasTarget = false;
+            this.target++;
+          } else { //or if hasn't ...
+            this.isTimed = false; //stops the stopwatch for our bot
+            this.state = false; //sets state of our bot to inactive
+            this.hasTarget = false;
+            this.distanceTravelled -= this.distanceBeforeFirstTarget;
+            gameEngine.runningBots--; //removes our bot from the list with active bots
+          }
         }
       }
     }
@@ -538,14 +556,16 @@ function drawStats() {
     screenStats.push(["[bot " +                               gameEngine.bots[i].id + "]", 
                       "    posX: " +                 parseInt(gameEngine.bots[i].position.x), 
                       "    posY: " +                 parseInt(gameEngine.bots[i].position.y), 
+                      "    posZ: " +                 parseInt(gameEngine.bots[i].position.z), 
                       "    destinationX: " +         parseInt(gameEngine.bots[i].destination.x), 
                       "    destinationY: " +         parseInt(gameEngine.bots[i].destination.y),
+                      "    destinationZ: " +         parseInt(gameEngine.bots[i].destination.z),
                       "    target: " +                        gameEngine.bots[i].target, 
                       "    active: " +                        gameEngine.bots[i].state, 
                       "    speed: " +              parseFloat(gameEngine.bots[i].speed).toFixed(3) + " m/s",
                       "    fuel: " +               parseFloat(gameEngine.bots[i].fuel).toFixed(3) + " litres",
-                      "    weight: " +             parseFloat(gameEngine.bots[i].loadedMass).toFixed(3),
-                      "    altitude: " +                      gameEngine.bots[i].altitude,
+                      "    weight: " +             parseFloat(gameEngine.bots[i].loadedMass).toFixed(3) + " kgs",
+                      "    altitude: " +           parseFloat(gameEngine.bots[i].altitude).toFixed(3) + " meters",
                       "    heading: " +            parseFloat(gameEngine.bots[i].heading).toFixed(3),
                       "    pitch: " +                         gameEngine.bots[i].pitch,
                       "    roll: " +                          gameEngine.bots[i].roll,
@@ -583,7 +603,7 @@ function drawFPS() {
     racetrackWindow.Context.textBaseline = "alphabetic";
     racetrackWindow.Context.fillText("FPS: " + gameEngine.currentFPS, 4, 16); //FPS, 4px offset from top left corner
     racetrackWindow.Context.fillText("render time (in ms): " + gameEngine.currentMS, 4, 32); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("racetrack length (in m): " + gameEngine.racetrackLength, 4, 48); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("racetrack length (in m): " + parseFloat(gameEngine.racetrackLength).toFixed(3), 4, 48); //ms, 4px offset from top left corner
   }
 }
 
@@ -697,6 +717,7 @@ function updateWorld() {
   if (gameEngine.runningBots === 0) { //checks if we have any active bots so we can continue the simulation
     gameEngine.gameState = 2; //this tells the engine that the game is paused
     //add here some stats logic
+    return; //maybe it's better to early exit from the function, execution of the conditions below is useless
   }
   
   for (var i = 0; i < gameEngine.bots.length; i++) {
@@ -718,12 +739,13 @@ function renderWorld(passDeltaTime) { //order when objects should be rendered: m
 
 /* -------------------------------------------------------------------------- */
 
-var t = 0;
+// these vars are for FIX-YOUR-TIMESTEP solution
+/*var t = 0;
 var dt = 0.01;
 var accumulator = 0;
 var previousState = 0;
 var currentState = 0;
-var state = 0;
+var state = 0;*/
 
 gameEngine.currentTime = performance.now().toFixed(3); //gets the current time needed for our engine
 
@@ -738,8 +760,7 @@ function main() {
     return;
   }
   
-  //commented because we're testing FIX-YOUR-TIMESTEP solution
-  /*if (gameEngine.gameState === 1) { //this checks if the game is running and continuously loops it
+  if (gameEngine.gameState === 1) { //this checks if the game is running and continuously loops it
     gameEngine.currentTime = performance.now().toFixed(3); //gets the current time needed for our engine
     gameEngine.b = (Math.abs(gameEngine.currentTime - gameEngine.lastTime) * 0.001);
     //this updates our deltaTime
@@ -758,10 +779,11 @@ function main() {
     renderWorld(gameEngine.dTime / (gameEngine.timeStep * gameEngine.timeScale));
     gameEngine.lastTime = gameEngine.currentTime;
     requestAnimationFrame(main);
-  }*/
+  }
   
   // exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
-  if (gameEngine.gameState === 1) {
+  //currentState and previousState maybe are current and previous position of our bots, in fact idk
+  /*if (gameEngine.gameState === 1) {
     var newTime = performance.now().toFixed(3);
     var frameTime = newTime - gameEngine.currentTime;
     
@@ -786,7 +808,7 @@ function main() {
     renderWorld(state);
 
     requestAnimationFrame(main);
-  }
+  }*/
   
   if (gameEngine.gameState === 2) { drawMenus(2); return; } //draws menus for when the game is paused
 }
