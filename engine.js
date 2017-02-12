@@ -105,6 +105,8 @@ var gameEngine = {
   b: 0, temp: 0, 
   dx: 0, dy: 0, 
   gravity: 9.80665, //in m/s
+  earthRadius: 6371000, //in m
+  earthPowRadius: 40589641000000, //in m
   frictionVector: 0.99, //maybe for ground vehicles
   bounceFactor: 0.05, //maybe for particles or projectiles
   distance: 0, x: 0, y: 0, 
@@ -198,7 +200,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.startPosDiffX = Math.abs(targets[1].x - targets[0].x);
   this.startPosDiffY = Math.abs(targets[1].y - targets[0].y);
   this.startPosDiffZ = Math.abs(targets[1].z - targets[0].z);
-  this.startPosDistance = (Math.hypot(this.startPosDiffX, this.startPosDiffY, this.startPosDiffZ));
+  this.startPosDistance = Math.hypot(this.startPosDiffX, this.startPosDiffY, this.startPosDiffZ);
   
   if (this.startPosDistance > 0) {
     this.startPosDiffX = this.startPosDiffX / this.startPosDistance;
@@ -260,7 +262,8 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
      
         //calculates distance between our bot and it's current destination
         //IMPORTANT - DO NOT REMOVE ~~ FROM HERE or bots stuck in checkpoints
-        this.distance = ~~(Math.hypot(diffX, diffY, diffZ)); //perf tests show that using ~~ the code is 8% faster
+        //it seems that if removed there's no more bots stucked, this happened after adding the 3rd dimension
+        this.distance = Math.hypot(diffX, diffY, diffZ); //perf tests show that using ~~ in front of Math.hypot() the code is 8% faster
 
         //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
         if (this.distance > 0) {
@@ -273,32 +276,45 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
         //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
         if (this.distance > 1) {
           //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
-          var targetAngle = Math.atan2(diffY, diffX) * (180 / Math.PI);
+          var targetAngleXY = Math.atan2(diffY, diffX) * (180 / Math.PI);
+          //var targetAngleZ = Math.atan(diffX/diffY) * (180 / Math.PI);
+          //this.pitch = targetAngleZ;
           
           //controls direction and turning speed of our bot, turning speed 0.1667 is one minute or 1/60 degree
-          if (this.heading > targetAngle) {
+          if (this.heading > targetAngleXY) {
             this.heading -= (gameEngine.timeScale / 0.1667); //using timeScale here should be fixed, this always gives 0.1
-          } else if (this.heading < targetAngle) {
+          } else if (this.heading < targetAngleXY) {
             this.heading += (gameEngine.timeScale / 0.1667);
           }
+          
+          /*if (this.pitch > targetAngleZ) {
+            this.pitch -= (gameEngine.timeScale / 0.1667); //using timeScale here should be fixed, this always gives 0.1
+          } else if (this.pitch < targetAngleZ) {
+            this.pitch += (gameEngine.timeScale / 0.1667);
+          }*/
+          
           
           //moves our bot
           var vx = diffX * this.acceleration;
           var vy = diffY * this.acceleration;
           var vz = diffZ * this.acceleration;
           //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
-          var dragX = -0.5 * gameEngine.airDensity * Math.pow(vx, 2) * this.dragCoeff * this.frontalArea;
-          var dragY = -0.5 * gameEngine.airDensity * Math.pow(vy, 2) * this.dragCoeff * this.frontalArea;
-          var dragZ = -0.5 * gameEngine.airDensity * Math.pow(vz, 2) * this.dragCoeff * this.frontalArea;
+          //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping and travelled distance is somewhat CORRECT!!!
+          var dragX = 0.5 * gameEngine.airDensity * Math.pow(vx, 2) * this.dragCoeff * this.frontalArea;
+          var dragY = 0.5 * gameEngine.airDensity * Math.pow(vy, 2) * this.dragCoeff * this.frontalArea;
+          var dragZ = 0.5 * gameEngine.airDensity * Math.pow(vz, 2) * this.dragCoeff * this.frontalArea;
           dragX = (isNaN(dragX) ? 0 : dragX);
           dragY = (isNaN(dragY) ? 0 : dragY);
           dragZ = (isNaN(dragZ) ? 0 : dragZ);
-          this.position.x += vx + (vx / dragX); //minus aerodynamic drag (dragX)
-          this.position.y += vy + (vy / dragY); //minus aerodynamic drag (dragY)
-          this.position.z += vz + (vz / dragZ) - 0.5*gameEngine.gravity*gameEngine.timeStep*gameEngine.timeStep; //minus gravity (gameEngine.gravity)
-          
+          //calculate actual Earth's gravity
+          var distanceFromEarthCenter = gameEngine.earthRadius + this.position.z;
+          var currentGravity = gameEngine.gravity * (gameEngine.earthPowRadius / Math.pow(distanceFromEarthCenter, 2));
+          currentGravity = parseFloat(currentGravity).toFixed(6);
+          this.position.x += vx - (dragX*gameEngine.timeStep); //minus aerodynamic drag (dragX)
+          this.position.y += vy - (dragY*gameEngine.timeStep); //minus aerodynamic drag (dragY)
+          this.position.z += vz - (dragZ - 0.5*currentGravity)*gameEngine.timeStep; //minus gravity (gameEngine.gravity)
           //calculates current speed and travelled distance of our bot
-          var tmp = (Math.hypot(vx, vy, vz)); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
+          var tmp = Math.hypot(vx, vy, vz); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
           this.distanceTravelled += tmp;
           this.speed = (tmp / gameEngine.timeStep); //V = S / t, in m/s
           this.altitude = this.position.z;
@@ -745,9 +761,8 @@ var dt = 0.01;
 var accumulator = 0;
 var previousState = 0;
 var currentState = 0;
-var state = 0;*/
-
-gameEngine.currentTime = performance.now().toFixed(3); //gets the current time needed for our engine
+var state = 0;
+gameEngine.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution*/
 
 // this is our engine's loop
 function main() {
