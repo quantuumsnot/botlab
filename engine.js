@@ -105,6 +105,7 @@ var gameEngine = {
   b: 0, temp: 0, 
   dx: 0, dy: 0, 
   gravity: 9.80665, //in m/s
+  currentGravity: this.gravity, //in m/s
   earthRadius: 6371000, //in m
   earthPowRadius: 40589641000000, //in m
   frictionVector: 0.99, //maybe for ground vehicles
@@ -113,6 +114,11 @@ var gameEngine = {
   racetrackLength: 0, //in m
   tau: 6.283184, /*or (3.141592/180)*360 or 2*Pi from degrees to radians, cause arc() uses radians*/
   airDensity: 1.22, //in kg/cub.m
+  airTemperature: 20, //in celsius, reference
+  airViscosity: 0.00001983, //in kg/(m-s) at 20'C
+  airPressure: 101325, //in Pa
+  SutherlandConstant: 120, //for air
+  RankinRefTemp: 527.67, //reference airtemp in Rankine degree == 20'C
   counter: 0, 
   showFPS: true, currentFPS: 0, currentMS: 0, showTraj: false, showUnitStats: true, 
   botIdCounter: 0, bots: [], runningBots: 0, 
@@ -274,7 +280,9 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
         
         //checks if our bot is still away from the target, remove jitter with 1 instead of 0
         //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
-        if (this.distance > 1) {
+        //IMPORTANT - after adding air pressure, density and temp it seems that bot stuck again at the checkpoints
+        //so this is hardcoded workaround value for distance
+        if (this.distance >= 1.11) {
           //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
           var targetAngleXY = Math.atan2(diffY, diffX) * (180 / Math.PI);
           //var targetAngleZ = Math.atan(diffX/diffY) * (180 / Math.PI);
@@ -293,36 +301,77 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
             this.pitch += (gameEngine.timeScale / 0.1667);
           }*/
           
-          
-          //moves our bot
+          //calculate velocities for each axis
           var vx = diffX * this.acceleration;
           var vy = diffY * this.acceleration;
           var vz = diffZ * this.acceleration;
-          //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
-          //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping and travelled distance is somewhat CORRECT!!!
-          var dragX = 0.5 * gameEngine.airDensity * Math.pow(vx, 2) * this.dragCoeff * this.frontalArea;
-          var dragY = 0.5 * gameEngine.airDensity * Math.pow(vy, 2) * this.dragCoeff * this.frontalArea;
-          var dragZ = 0.5 * gameEngine.airDensity * Math.pow(vz, 2) * this.dragCoeff * this.frontalArea;
-          dragX = (isNaN(dragX) ? 0 : dragX);
-          dragY = (isNaN(dragY) ? 0 : dragY);
-          dragZ = (isNaN(dragZ) ? 0 : dragZ);
-          //calculate actual Earth's gravity
-          var distanceFromEarthCenter = gameEngine.earthRadius + this.position.z;
-          var currentGravity = gameEngine.gravity * (gameEngine.earthPowRadius / Math.pow(distanceFromEarthCenter, 2));
-          currentGravity = parseFloat(currentGravity).toFixed(6);
-          this.position.x += vx - (dragX*gameEngine.timeStep); //minus aerodynamic drag (dragX)
-          this.position.y += vy - (dragY*gameEngine.timeStep); //minus aerodynamic drag (dragY)
-          this.position.z += vz - (dragZ - 0.5*currentGravity)*gameEngine.timeStep; //minus gravity (gameEngine.gravity)
+          
           //calculates current speed and travelled distance of our bot
           var tmp = Math.hypot(vx, vy, vz); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
           this.distanceTravelled += tmp;
           this.speed = (tmp / gameEngine.timeStep); //V = S / t, in m/s
           this.altitude = this.position.z;
+          
+          //calculate current airTemperature
+          var tempTemp = 288.15 - (0.0065 * this.altitude); //in Kelvin
+          var KelvinToRankine = (9 / 5) * (tempTemp);
+          
+          //calculate current airDensity and pressure
+          gameEngine.airPressure = 101325 * Math.pow((1 - ((0.0065*this.altitude)/288.15)), ((gameEngine.currentGravity * 0.0289644) / (8.31447 * 0.0065)));
+          gameEngine.airDensity = (gameEngine.airPressure * 0.0289644) / (8.31447 * tempTemp);
+          
+          //calculate current airPressure
+          gameEngine.airPressureX = 0.5 * gameEngine.airDensity * Math.pow(vx, 2);
+          gameEngine.airPressureY = 0.5 * gameEngine.airDensity * Math.pow(vy, 2);
+          gameEngine.airPressureZ = 0.5 * gameEngine.airDensity * Math.pow(vz, 2);
+          
+          //calculate current airViscosity
+          gameEngine.airViscosity = gameEngine.airViscosity*(((0.555*gameEngine.RankinRefTemp) + gameEngine.SutherlandConstant)/((0.555*KelvinToRankine) + gameEngine.SutherlandConstant))*Math.pow(KelvinToRankine/gameEngine.RankinRefTemp, 3.2);
+
+          //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
+          //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping and travelled distance is somewhat CORRECT!!!
+          
+          //calculate drag for low velocity for each axis
+          var dragXLowV = 6 * Math.PI * gameEngine.airViscosity * this.size * vx;
+          var dragYLowV = 6 * Math.PI * gameEngine.airViscosity * this.size * vy;
+          var dragZLowV = 6 * Math.PI * gameEngine.airViscosity * this.size * vz;
+          
+          //calculate drag for high velocity for each axis
+          var dragX = gameEngine.airPressureX * this.dragCoeff * this.frontalArea;
+          var dragY = gameEngine.airPressureY * this.dragCoeff * this.frontalArea;
+          var dragZ = gameEngine.airPressureZ * this.dragCoeff * this.frontalArea;
+          dragX = (isNaN(dragX) ? 0 : dragX);
+          dragY = (isNaN(dragY) ? 0 : dragY);
+          dragZ = (isNaN(dragZ) ? 0 : dragZ);
+          
+          //calculate actual Earth's gravity
+          var distanceFromEarthCenter = gameEngine.earthRadius + this.position.z;
+          gameEngine.currentGravity = gameEngine.gravity * (gameEngine.earthPowRadius / Math.pow(distanceFromEarthCenter, 2));
+          gameEngine.currentGravity = parseFloat(gameEngine.currentGravity).toFixed(6);
+          
+          //move our bot
+          this.position.x += vx - (dragX*gameEngine.timeStep); //minus aerodynamic drag (dragX)
+          this.position.y += vy - (dragY*gameEngine.timeStep); //minus aerodynamic drag (dragY)
+          this.position.z += vz - (dragZ - 0.5*gameEngine.currentGravity)*gameEngine.timeStep; //minus gravity (gameEngine.gravity)
           //this console.log below is interesting
           //seems current speed of the bot (to be precise distance travelled) and its acceleration based on aero formula thrust / mass ...
-          //... are not equal or almost equal, ie the speed is between 5 and 50% bigger than usual ...
+          //... are not equal or almost equal, ie the speed sometimes is between 1 and 50% bigger than usual ...
           //... or maybe the gameEngine.dTime is not correct, dunno why
           //console.log("bot " + i + " - " + this.acceleration + " | vxvyvz - " + Math.hypot(vx, vy, vz));
+          
+          //output all parameters for debugging, only for one bot
+          if (this.id === 0) {
+            console.log("Speed "          + this.speed +
+                        " Altitude "       + this.altitude +
+                        " AirTemp "        + tempTemp +
+                        " AirDensity "     + gameEngine.airDensity +
+                        " AirPressureX "    + gameEngine.airPressureX +
+                        " AirPressureY "    + gameEngine.airPressureY +
+                        " AirPressureZ "    + gameEngine.airPressureZ +
+                        " AirViscosity "   + gameEngine.airViscosity +
+                        " CGravity "       + gameEngine.currentGravity
+                       );
+          }
         } else {
           if (this.target < targetCount - 1) { //checks if our bot has more targets
             this.hasTarget = false;
