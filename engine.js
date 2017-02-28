@@ -63,6 +63,7 @@ var atan = Math.atan;
 var PI = 3.141592; //Math.PI, hardcoded must be faster
 var sqrt = Math.sqrt;
 var pow = Math.pow;
+var exp = Math.exp;
 var hypot = Math.hypot;
 var min = Math.min;
 var max = Math.max;
@@ -147,26 +148,31 @@ var sim = {
   timeStep: 0.01667, //in s
   timeDiff: 0, temp: 0, 
   dx: 0, dy: 0, 
-  gravity: 9.80665, //reference gravity in m/sq. s at sea level
-  currentGravity: this.gravity, //in m/sq. s
+  referenceGravity: 9.80665, //reference gravity in m/sq. s at sea level
+  currentGravity: this.referenceGravity, //in m/sq. s
   earthRadius: 6371000, //in m
   earthPowRadius: 40589641000000, //in m
+  geopotentialHeight: 0, //in m
   frictionVector: 0.99, //maybe for ground vehicles
   bounceFactor: 0.05, //maybe for particles or projectiles
   distance: 0, x: 0, y: 0, 
   racetrackLength: 0, //in m
   tau: 6.283184, //or (3.141592/180)*360 or 2*Pi from degrees to radians, because arc() uses radians
-  airDensity: 1.225, //reference air density at sea level in kg/cub.m, or 0.0764734 lb/cub. ft
-  airTemperature: 15, //reference air temp in Celsius at sea level, or 288.15 K
-  airViscosity: 0.00001789, //0.00001789 reference air viscosity in centipoise at reference temperature in Celsius, or 0.01827 at reference temperature in Rankine
-  airPressure: 101325, //reference air pressure in Pa at sea level
+  airReferenceTemperature: 15, //reference air temp in Celsius at sea level, or 288.15 K 
+  airReferenceViscosity: 0.01827, //0.00001789 reference air viscosity in centipoise at reference temperature in Celsius, or 0.01827 at reference temperature in Rankine
+  airReferencePressure: 101325, //reference air pressure in Pa at sea level and 15'C air temperature
+  airReferenceDensity: 1.225, //reference air density at sea level in kg/cub.m, or 0.0764734 lb/cub. ft
   RankineRefTemp: 518.76, //reference air temp in Rankine degree == 15'C
-  airLapseRate: 0.0098, //reference air lapse rate in Celsius per meter altitude, 0.0065 reference air lapse rate in Kelvin per meter, 0.0019812 in Kelvin per foot
-  gasConstant: 8.31432, //reference gas constant at sea level, in J/mol Kelving, or 1545.31 ft lb/lbmol Rankine
-  kinematicViscosity: 0, 
   SutherlandConstant: 120, //for air
+  gasConstant: 8.3144598, //reference gas constant at sea level, in J/mol Kelvin, or 1545.35 ft lb/lbmol Rankine
+  airMolarMass: 0.0289644, // in kg/mol
+  airLapseRate: 0.0065, //0.0098 reference air lapse rate in Celsius per meter altitude, 0.0065 reference air lapse rate in Kelvin per meter, 0.0019812 in Kelvin per foot
+  airViscosity: this.airReferenceViscosity, 
+  airPressure: this.airReferencePressure, 
+  airDensity: this.airReferenceDensity, 
+  kinematicViscosity: 0, 
   ReynoldsNumber: 0, 
-  currentTemp: 0, 
+  airCurrentTemp: this.airReferenceTemperature, 
   counter: 0, 
   showFPSMem: true, currentFPS: 0, currentMS: 0, currentMem: 0, showTraj: false, showUnitStats: true, 
   botIdCounter: 0, bots: [], runningBots: 0, 
@@ -359,9 +365,9 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           
           //controls direction and turning speed of our bot, turning speed 0.1667 is one minute or 1/60 degree
           if (this.heading > targetAngleXY) {
-            this.heading -= this.rotationSpeedX + this.rotationSpeedY;
+            this.heading -= (this.rotationSpeedX + this.rotationSpeedY) + 1;
           } else if (this.heading < targetAngleXY) {
-            this.heading += this.rotationSpeedX + this.rotationSpeedY;
+            this.heading += (this.rotationSpeedX + this.rotationSpeedY) + 1;
           }
           
           if (this.pitch > targetAngleZ) {
@@ -375,13 +381,45 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           this.velocity.y += diffY * this.acceleration * sim.timeStep;
           this.velocity.z += diffZ * this.acceleration * sim.timeStep;
           
-          //calculate current air temperature
-          sim.currentTemp = (sim.airLapseRate * this.altitude) + 273.15; //in Kelvin
-          var KelvinToRankine = sim.currentTemp * 1.8; //in Rankine
+          //FIRST calculate Geopotential height
+          //this is gravity-adjusted altitude of our bot, using variation of the gravity with latitude and elevation
+          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+          sim.geopotentialHeight = (sim.earthRadius * this.altitude / (sim.earthRadius + this.altitude)) / 1000; //in kilometers
+          
+          //1st variant
+          //calculate current air temperature, in Kelvin
+          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+          if (sim.geopotentialHeight <= 11) { sim.airCurrentTemp = 288.15 - (6.5 * sim.geopotentialHeight); } // Troposphere
+          else if (sim.geopotentialHeight <= 20) { sim.airCurrentTemp = 216.65 - (6.5 * sim.geopotentialHeight); } // Stratosphere starts
+          else if (sim.geopotentialHeight <= 32) { sim.airCurrentTemp = 196.65 + sim.geopotentialHeight; }
+          else if (sim.geopotentialHeight <= 47) { sim.airCurrentTemp = 228.65 + 2.8 * (sim.geopotentialHeight - 32); }
+          else if (sim.geopotentialHeight <= 51) { sim.airCurrentTemp = 270.65 - (6.5 * sim.geopotentialHeight); }// Mesosphere starts
+          else if (sim.geopotentialHeight <= 71) { sim.airCurrentTemp = 270.65 - 2.8 * (sim.geopotentialHeight - 51); }
+          else if (sim.geopotentialHeight <= 84.85) { sim.airCurrentTemp = 214.65 - 2 * (sim.geopotentialHeight - 71); }
+          //geopotHeight must be less than 84.85 km
+          //2nd variant
+          //sim.airCurrentTemp = sim.airReferenceTemperature - (sim.airLapseRate*this.altitude) + 273.15; //in Kelvin
+          /*---------------------*/
+          var KelvinToRankine = sim.airCurrentTemp * 1.8; //in Rankine
           
           //calculate current air density and pressure
-          sim.airPressure = 101325 * pow((1 - ((sim.airLapseRate*this.altitude)/273.15)), ((sim.currentGravity * 0.0289644) / (8.31447 * sim.airLapseRate)));
-          sim.airDensity = (sim.airPressure * 0.0289644) / (8.31447 * sim.currentTemp);
+          //NOTE - not sure if these equations are returning correct values
+          //1st variant
+          //sim.airPressure = sim.airReferencePressure * pow((1 - ((sim.airLapseRate*this.altitude)/288.15)), ((sim.currentGravity * sim.airMolarMass) / (sim.gasConstant * sim.airLapseRate)));
+          //2nd variant
+          //sim.airPressure = sim.airReferencePressure * exp((-sim.currentGravity*sim.airMolarMass*this.altitude)/(sim.gasConstant*sim.airCurrentTemp));
+          
+          //3rd variant, in Pascals
+          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+          if (sim.geopotentialHeight <= 11) { sim.airPressure = 101325 * pow(288.15 / sim.airCurrentTemp, -5.255877); }
+          else if (sim.geopotentialHeight <= 20) { sim.airPressure = 22632.06 * exp(-0.1577 * (sim.geopotentialHeight - 11)); }
+          else if (sim.geopotentialHeight <= 32) { sim.airPressure = 5474.889 * pow(216.65 / sim.airCurrentTemp, 34.16319); }
+          else if (sim.geopotentialHeight <= 47) { sim.airPressure = 868.0187 * pow(228.65 / sim.airCurrentTemp, 12.2011); }
+          else if (sim.geopotentialHeight <= 51) { sim.airPressure = 110.9063 * exp(-0.1262 * (sim.geopotentialHeight - 47)); }
+          else if (sim.geopotentialHeight <= 71) { sim.airPressure = 66.93887 * pow(270.65 / sim.airCurrentTemp, -12.2011); }
+          else if (sim.geopotentialHeight <= 84.85) { sim.airPressure = 3.956420 * pow(214.65 / sim.airCurrentTemp, -17.0816); }
+          //altitude must be less than 86 km
+          sim.airDensity = (sim.airPressure * sim.airMolarMass) / (sim.gasConstant * sim.airCurrentTemp);
           
           //calculate current air pressure at bot's position
           sim.airPressureX = 0.5 * sim.airDensity * pow(this.velocity.x, 2);
@@ -389,7 +427,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           sim.airPressureZ = 0.5 * sim.airDensity * pow(this.velocity.z, 2);
           
           //calculate current air viscosity
-          sim.airViscosity = sim.airViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*KelvinToRankine) + sim.SutherlandConstant))*pow(KelvinToRankine/sim.RankineRefTemp, 3.2);
+          sim.airViscosity = sim.airReferenceViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*KelvinToRankine) + sim.SutherlandConstant))*pow(KelvinToRankine/sim.RankineRefTemp, 3.2); //in centipose
 
           //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
           //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping and travelled distance is somewhat CORRECT!!!
@@ -416,7 +454,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           
           //calculate actual Earth's gravity
           var distanceFromEarthCenter = sim.earthRadius + this.position.z;
-          sim.currentGravity = sim.gravity * (sim.earthPowRadius / pow(distanceFromEarthCenter, 2));
+          sim.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(distanceFromEarthCenter, 2));
           sim.currentGravity = parseFloat(sim.currentGravity).toFixed(6);
           
           //move our bot, maybe a Verlet version
