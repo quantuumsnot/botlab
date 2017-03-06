@@ -1,5 +1,6 @@
 // description: testing lab for bots and their AI
 // author: me
+// source code: https://github.com/quantuumsnot/botlab
 
 'use strict'; //meh
 
@@ -60,7 +61,8 @@ var sin = Math.sin;
 var cos = Math.cos;
 var atan2 = Math.atan2;
 var atan = Math.atan;
-var PI = 3.141592; //Math.PI, hardcoded must be faster
+var PI = 3.141592; //Math.PI, hardcoded must be faster cause we're not calling each time Math.PI object
+var TAU = 2 * PI; //6.283184 or (3.141592/180)*360 or 2*Pi from degrees to radians, because arc() uses radians
 var sqrt = Math.sqrt;
 var pow = Math.pow;
 var exp = Math.exp;
@@ -157,7 +159,6 @@ var sim = {
   bounceFactor: 0.05, //maybe for particles or projectiles
   distance: 0, x: 0, y: 0, 
   racetrackLength: 0, //in m
-  tau: 6.283184, //or (3.141592/180)*360 or 2*Pi from degrees to radians, because arc() uses radians
   airReferenceTemperature: 15, //reference air temp in Celsius at sea level, or 288.15 K 
   airReferenceViscosity: 0.01827, //0.00001789 reference air viscosity in centipoise at reference temperature in Celsius, or 0.01827 at reference temperature in Rankine
   airReferencePressure: 101325, //reference air pressure in Pa at sea level and 15'C air temperature
@@ -225,6 +226,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.loadedMass = this.fuel + this.mass; //in kg
   this.height = height; //in m
   this.acceleration = this.thrust / this.loadedMass; //acceleration in m/s
+  this.oldAcceleration = 0;
   this.velocity = {x: 0, y: 0, z: 0}; //maybe needed for proper integration
   this.speed = 0; //current speed in m/s
   this.wingSpan = wingspan; //in m
@@ -234,11 +236,11 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.frontalArea = this.wingSpan * this.height; //in sq.m
   this.liftCoeff = 0;
   this.liftForce = 0; //in kN
-  this.fuelConsumption = (this.thrust / 100) * 0.035; //in litres per second, thrust * fuel consumption per second, for jet engine ~150kN ~35g fuel per second per 1kN or 100kg thrust
+  this.fuelConsumption = (this.thrust / 100) * 0.035; //0.035 litres per second, thrust * fuel consumption per second, for jet engine ~150kN ~35g fuel per second per 1kN or 100kg thrust
   this.trajectoryLine = traj;
-  this.rotationSpeedX = PI * 2 / 100; //100 is FPS, default is one minute (0.1667) or 1/60 degree
-  this.rotationSpeedY = PI * 2 / 100;
-  this.rotationSpeedZ = PI * 2 / 100;
+  this.rotationSpeedX = TAU / 100; //100 FPS (this is wrong and must be fixed), default is one minute (0.1667) or 1/60 degree
+  this.rotationSpeedY = TAU / 100;
+  this.rotationSpeedZ = TAU / 100;
   this.CoM = 0; //center of mass
   this.CoT = 0; //center of thrust
   this.CoL = 0; //center of lift
@@ -281,7 +283,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   /* ------------------------------------------------------------------------ */
 
   this.updateBot = function() {
-    if (this.state === true) { //checks if our bot is active
+    if (this.state === true) { //check if our bot is active
       //start the stopwatch for our bot
       if (this.target === 1 && this.isTimed === false && this.startTime === 0) {
         this.startTime = performance.now();
@@ -297,7 +299,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
       if (this.fuel >= this.fuelConsumption * sim.timeStep) { 
         this.fuel -= this.fuelConsumption * sim.timeStep;
         this.loadedMass -= this.fuelConsumption * sim.timeStep;
-        this.acceleration += (this.thrust*sim.timeStep) / this.loadedMass;
+        this.acceleration = (this.thrust*sim.timeStep) / this.loadedMass;
       } else {
         if (this.target <= targetCount) {
           this.fuel = 0; //directly set fuel to 0 when it is < 0 or has some very low values ~0.050l
@@ -457,13 +459,24 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           sim.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(distanceFromEarthCenter, 2));
           sim.currentGravity = parseFloat(sim.currentGravity).toFixed(6);
           
-          //move our bot, maybe a Verlet version
-          var stepX = (this.velocity.x - dragX + (sim.timeStep*0.5*this.acceleration))*sim.timeStep; //minus aerodynamic drag (dragX)
-          var stepY = (this.velocity.y - dragY + (sim.timeStep*0.5*this.acceleration))*sim.timeStep; //minus aerodynamic drag (dragY)
-          var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*sim.currentGravity*sim.timeStep)+(sim.timeStep*0.5*this.acceleration))*sim.timeStep; //minus gravity (sim.gravity) + liftForce
+          //move our bot, maybe a Verlet version?
+          //1st variant
+          //var stepX = (this.velocity.x - dragX + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragX)
+          //var stepY = (this.velocity.y - dragY + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragY)
+          //var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*sim.currentGravity*sim.timeStep)+(0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragZ) + liftForce - gravity (sim.gravity) 
+          //2nd variant
+          this.acceleration *= 0.5*sim.timeStep;
+          sim.currentGravity *= 0.5*sim.timeStep*sim.timeStep;
+          this.velocity.x += diffX * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+          this.velocity.y += diffY * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+          this.velocity.z += diffZ * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+          var stepX = (this.velocity.x - dragX + this.acceleration);
+          var stepY = (this.velocity.y - dragY + this.acceleration);
+          var stepZ = (this.velocity.z - dragZ - sim.currentGravity + this.liftForce);// + this.acceleration);
           this.position.x += stepX;
           this.position.y += stepY;
           this.position.z += stepZ;
+          this.oldAcceleration = this.acceleration;
           
           //calculate current speed and travelled distance of our bot
           var tmp = hypot(stepX, stepY, stepZ); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
@@ -506,7 +519,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           if (this.target < targetCount - 1) { //check if our bot has more targets
             this.hasTarget = false;
             this.target++;
-            this.distanceTravelled += 1.11;
+            this.distanceTravelled += this.size;
           } else { //or if hasn't ...
             this.isTimed = false; //stop the stopwatch for our bot
             this.state = false; //set state of our bot to inactive
@@ -528,7 +541,7 @@ function spawnBots() {
   
   //create 10 random bots for testing
   /*for (var i = 0; i < 10; i++) {
-    sim.bots.push(new Bot('#'+random().toString(16).slice(-6), //color//http://stackoverflow.com/a/5365036/1196983
+    sim.bots.push(new Bot('#'+random().toString(16).slice(-6), //color based on http://stackoverflow.com/a/5365036/1196983
                                                                         100, //dragpoints
                                                                         15000, //thrust
                                                                         5000, //mass
@@ -698,7 +711,7 @@ function drawRacetrack() {
   for (var i = 0; i < targetCount; i++) {
     racetrackWindow.Context.beginPath();
     //racetrackWindow.Context.moveTo(targets[i].x, targets[i].y);
-    racetrackWindow.Context.arc(targets[i].x, targets[i].y, sim.targetSize, 0, sim.tau);
+    racetrackWindow.Context.arc(targets[i].x, targets[i].y, sim.targetSize, 0, TAU);
     racetrackWindow.Context.strokeStyle = "yellow";
     racetrackWindow.Context.stroke();
   }
@@ -723,10 +736,14 @@ function drawUnits(passDeltaTime) {
       }
       //--
       racetrackWindow.Context.moveTo(drawX, drawY);
-      racetrackWindow.Context.ellipse(drawX, drawY, sim.bots[i].size, 
-                                      sim.bots[i].size, 
-                                      sim.bots[i].heading * (Math.PI/180) /*this rotates our bot, converted to radians because ellipse() uses radians*/, 
-                                      0, sim.tau, false);
+      racetrackWindow.Context.ellipse(drawX, //The x axis of the coordinate for the ellipse's center
+                                      drawY, //The y axis of the coordinate for the ellipse's center
+                                      sim.bots[i].size, //The ellipse's major-axis radius or X radius
+                                      sim.bots[i].size, //The ellipse's minor-axis radius or Y radius
+                                      sim.bots[i].heading * (PI/180), //The rotation for this ellipse, expressed in radians; This rotates our bot, converted to radians because ellipse() uses radians
+                                      0, //The starting point, measured from the x axis, from which it will be drawn, expressed in radians
+                                      TAU, //The end ellipse's angle to which it will be drawn, expressed in radians
+                                      false); //if true, draws the ellipse anticlockwise (counter-clockwise), otherwise in a clockwise direction
       racetrackWindow.Context.strokeStyle = sim.bots[i].color;
       racetrackWindow.Context.stroke();
       //racetrackWindow.Context.fillStyle = "black";
@@ -1055,10 +1072,10 @@ document.body.onload = function() {
 /* ------------------------------- TODO SECTION ----------------------------- */
 /*
 1. Physics
-2. Loading each bot model from a file
-3. Collision detection
+2. Loading bot models from file(s)
+3. Collision detection per model or per sim mode
 4. AI
-5. Projectiles
+5. Projectiles for dogfight/evasion modes
 6. Aftermath statistics
 7. Sim controls
 */
