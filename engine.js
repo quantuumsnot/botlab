@@ -35,7 +35,7 @@ S: 83, D: 68, NUMLOCK: 144, SCROLLLOCK: 145},
 blockedKeys = [19, 32, 37, 38, 39, 40], //arrows, space, pause
 specialKeysState = {SHIFT: false, CTRL: false, ALT: false}, //shift, ctrl, alt
 mainRatio = 12,
-screenMenus = ["START"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
+screenMenus = ["ADD BOT"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
 var baseText = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-*/=%";
 var baseTextLength = baseText.length;
 var sortedMenus = screenMenus;
@@ -59,6 +59,7 @@ var floor = Math.floor;
 var random = Math.random;
 var sin = Math.sin;
 var cos = Math.cos;
+var acos = Math.acos;
 var atan2 = Math.atan2;
 var atan = Math.atan;
 var PI = 3.141592; //Math.PI, hardcoded must be faster cause we're not calling each time Math.PI object
@@ -138,11 +139,12 @@ var gameInterface = {
   pageHeight: window.innerHeight,
   ratio: racetrackWindow.CanvasWidth / telemetryWindow.CanvasWidth
 };
+
 var sim = {
   viewPortMinX: 0, viewPortMinY: 0, viewPortMaxX: racetrackWindow.CanvasWidth, viewPortMaxY: racetrackWindow.CanvasHeight, 
   mouseX: 0, mouseY: 0, mouseTarget: "", 
   mKey: 0, 
-  state: 0, /*0 - stopped, 1 - running, 2 - paused*/
+  state: 1, /*0 - stopped, 1 - running, 2 - paused*/
   destinationReached: false,
   startTime: 0, playedTime: 0, tempPlayedTime: 0, currentTime: 0, lastTime: 0, dTime: 0, timeProduct: 0, updateTime: 0, worldUpdates: 0, 
   distPerFrame: 0, 
@@ -179,7 +181,9 @@ var sim = {
   botIdCounter: 0, bots: [], runningBots: 0, 
   targetSize: 10
 };
+
 var mapData = {sizeX: 512, sizeY: 512};
+
 var targets = [ //for testing we are using a racetrack shaped like '8' symbol with 7 points
   {x: 256, y: 84, z: 128}, //1 start finish point
   {x: 338, y: 168, z: 256}, //2
@@ -191,9 +195,10 @@ var targets = [ //for testing we are using a racetrack shaped like '8' symbol wi
   {x: 168, y: 168, z: 256}, //8
   {x: 256, y: 84, z: 128} //9 start finish point
 ];
+
 var targetCount = targets.length;
 
-// this calculates length of the racetrack,later we'll use that for calculating the efficiency of our bots ...
+//calculate length of the racetrack, later we'll use that for calculating the efficiency of our bots ...
 // ... ie bot's travelled distance divided by racetrack's length will give us diff in percent (positive number means less efficient)
 for (var a = 0; a < targetCount; a++) {
   if (a === 8) continue;
@@ -208,7 +213,7 @@ for (var a = 0; a < targetCount; a++) {
 /*var mapTexture = new Image();
 mapTexture.src = "maptexture_test1.png";*/
 
-// this is the parent Bot object
+//main Bot object
 var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
   this.position = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.destination = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
@@ -359,6 +364,8 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
           var targetAngleXY = atan2(diffY, diffX) * (180 / PI);
           var targetAngleZ = atan(diffX/diffY) * (180 / PI);
+          //var targetAngleXY = acos(diffZ / this.distance) * (180 / PI);
+          //var targetAngleZ = atan2(diffY, diffX) * (180 / PI);
           
           //controls bot's altitude to be always bigger than its size, this is a crash prevention
           if (this.altitude <= this.size) {
@@ -371,6 +378,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
           } else if (this.heading < targetAngleXY) {
             this.heading += (this.rotationSpeedX + this.rotationSpeedY) + 1;
           }
+          //this.heading = targetAngleXY;
           
           if (this.pitch > targetAngleZ) {
             this.pitch -= this.rotationSpeedZ + 1;
@@ -526,6 +534,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
             this.hasTarget = false; //remove our bot's target state
             this.distanceTravelled -= this.distanceBeforeFirstTarget;
             sim.runningBots--; //remove our bot from the list with active bots
+            console.log("Bot " + this.id + " finished in " + parseFloat(this.time*0.001).toFixed(3) + " seconds | " + parseFloat(this.distanceTravelled).toFixed(3) + " meters travelled");
           }
         }
       }
@@ -533,7 +542,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   };
 };
 
-// this creates a couple of bots
+//create a couple of bots
 function spawnBots() {
   //(botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj)
   sim.bots.push(new Bot("red", 100, 15000, 5000, 5, 15, 70, 1, 1000, false));
@@ -554,7 +563,7 @@ function spawnBots() {
   }*/
 }
 
-// this restarts our simulation
+//restart our simulation
 function restartSim() {
   sim.state = 0;
   sim.botIdCounter = 0; 
@@ -565,7 +574,7 @@ function restartSim() {
   sim.state = 1;
 }
 
-// sounds section
+//sounds
 /*var sounds = {
   soldier:    {shootSnd: {this: new Audio(), src: "soldshot.ogg", play: function(){this.play()}}}, 
   tank:       {shootSnd: {this: new Audio(), src: "tankshot.ogg", play: function(){this.play()}}}, 
@@ -583,7 +592,7 @@ function restartSim() {
   }
 }*/
 
-// this detects mouse clicks
+//detect mouse clicks
 function mouseEvents(event) {
   if (event.target === racetrackWindow.Canvas) {
     event.preventDefault(); event.stopPropagation();
@@ -617,46 +626,47 @@ function mouseEvents(event) {
       event.preventDefault();
       event.stopPropagation();
       
-      if (sim.state === 0) { //detect click on Start in main menu
-        if (sim.mKey === 1) {
-          if (sim.mouseTarget === simOptionsWindow.Canvas) {
+      //if (sim.state === 0) { //detect click on Start in main menu
+        //if (sim.mKey === 1) {
+          //if (sim.mouseTarget === simOptionsWindow.Canvas) {
             //if (sim.mouseX > menuWidth && sim.mouseX < menuWidth*2 && sim.mouseY > menuHeight && sim.mouseY < menuHeight+menusTextHeight) { 
-            if (sim.mouseX > 0 && sim.mouseX < menuWidth && sim.mouseY > simOptionsWindow.CanvasHeight - menuHeight && sim.mouseY < simOptionsWindow.CanvasHeight) { 
-              spawnBots();
-              sim.state = 1;
-              main();
-              break;
-            }
-          }
-        }
-      }
+            //if (sim.mouseX > 0 && sim.mouseX < menuWidth && sim.mouseY > simOptionsWindow.CanvasHeight - menuHeight && sim.mouseY < simOptionsWindow.CanvasHeight) { 
+              //spawnBots();
+              //sim.state = 1;
+              //main();
+              //break;
+            //}
+          //}
+        //}
+      //}
       
       if (sim.state === 1) { //get mouse click coordinates
-        if (sim.mKey === 1) { //detects start of using selection rectangle or single unit selection
+        if (sim.mKey === 1) { //detect start of using selection rectangle or single unit selection
+          event.preventDefault(); event.stopPropagation();
+          spawnBots();
+        }
+        if (sim.mKey === 2) { //detect mid button click for map scroll
           event.preventDefault(); event.stopPropagation();
         }
-        if (sim.mKey === 2) { //detects mid button click for map scroll
-          event.preventDefault(); event.stopPropagation();
-        }
-        if (sim.mKey === 3) { //detects right button click
+        if (sim.mKey === 3) { //detect right button click
           event.preventDefault(); event.stopPropagation();
         }
       }
       
-      if (sim.state === 2) { //detects click on Exit or Resume in main menu
-        if (sim.mouseTarget === simOptionsWindow.Canvas) {
-          if (sim.mKey === 1) {
+      //if (sim.state === 2) { //detects click on Exit or Resume in main menu
+        //if (sim.mouseTarget === simOptionsWindow.Canvas) {
+          //if (sim.mKey === 1) {
             //if (sim.mouseX > menuWidth && sim.mouseX < menuWidth*2 && sim.mouseY > menuHeight && sim.mouseY < menuHeight+menusTextHeight) { //Restart
-            if (sim.mouseX > 0 && sim.mouseX < menuWidth && sim.mouseY > simOptionsWindow.CanvasHeight - menuHeight && sim.mouseY < simOptionsWindow.CanvasHeight) { 
-              sim.botIdCounter = 0; 
-              sim.bots = [];
-              sim.runningBots = 0;
-              sim.startTime = 0;
-              spawnBots();
-              sim.state = 1;
-              main();
-              break;
-            }
+            //if (sim.mouseX > 0 && sim.mouseX < menuWidth && sim.mouseY > simOptionsWindow.CanvasHeight - menuHeight && sim.mouseY < simOptionsWindow.CanvasHeight) { 
+              //sim.botIdCounter = 0; 
+              //sim.bots = [];
+              //sim.runningBots = 0;
+              //sim.startTime = 0;
+              //spawnBots();
+              //sim.state = 1;
+              //main();
+              //break;
+            //}
             //if (sim.mouseX > menuWidth && sim.mouseX < menuWidth*2 && sim.mouseY > (menuHeight+(menusTextHeight*2)) && sim.mouseY < (menuHeight+(menusTextHeight*3))) { //Exit
               // //the following lines reset game data in case of Exit
               //sim.botIdCounter = 0; 
@@ -667,9 +677,9 @@ function mouseEvents(event) {
               //main();
               //break;
             //}
-          }
-        }
-      }
+          //}
+        //}
+      //}
       
       break;
     //case "mousemove":
@@ -685,7 +695,7 @@ function mouseEvents(event) {
   }
 }
 
-// this clears racetrack and telemetry windows before each frame is drawn
+//clear racetrack and telemetry windows before each frame is drawn
 function clearFrame() {
   //resetting the matrix BEFORE clearing the viewport!!!
   racetrackWindow.Context.setTransform(1,0,0,1,0,0); //reset the transform matrix as it is cumulative
@@ -706,7 +716,7 @@ function clearFrame() {
   //var R = 255, G = 0, B = 0; //+-50% faster than var rgb = { R: 255, G: 0, B: 0 };
 }*/
 
-// this draws racetrack checkpoints
+//draw racetrack checkpoints
 function drawRacetrack() {
   for (var i = 0; i < targetCount; i++) {
     racetrackWindow.Context.beginPath();
@@ -717,7 +727,7 @@ function drawRacetrack() {
   }
 }
 
-// this draws our bots
+//draw our bots
 function drawUnits(passDeltaTime) {
   var optiInterp = 1 - passDeltaTime; //small optimization
   var botsCount = sim.bots.length;
@@ -767,7 +777,7 @@ function drawUnits(passDeltaTime) {
   }
 }
 
-// this draws a projectile
+//draw a projectile
 /*function drawProjectile() { //not used yet
   racetrackWindow.Context.fillStyle = "white";
   racetrackWindow.Context.fillRect(0, 0, racetrackWindow.CanvasWidth, racetrackWindow.CanvasHeight);
@@ -776,7 +786,7 @@ function drawUnits(passDeltaTime) {
   //}
 }*/
 
-// this outputs all stats to the telemetry window
+//output all stats to the telemetry window
 function drawStats() {
   var screenStats = [];
   var gameBotsLen = sim.bots.length;
@@ -819,7 +829,7 @@ function drawStats() {
   }
 }
 
-// this draws current frames per second on the screen
+//draw current frames per second on the screen
 function draw_FPS_and_Mem() {
   if (sim.showFPSMem === true) {
     var fpsFilter = 5;
@@ -848,12 +858,28 @@ function draw_FPS_and_Mem() {
   }
 }
 
-// this draws game menus on demand
+//draw game menus on demand
 function drawMenus(menuEvent) {
   console.log("Menu was drawn");
   simOptionsWindow.Context.beginPath();
   switch(menuEvent) { //0 - not running, 1 - running, 2 - paused
-    case 0: //not running
+    //case 0: //not running
+      //simOptionsWindow.Context.setTransform(1,0,0,1,0,0);
+      //simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
+      //telemetryWindow.Context.clearRect(0, 0, telemetryWindow.CanvasWidth, telemetryWindow.CanvasHeight); //do not clear the telemetryWindow or at the end bot data will be cleared
+      //simOptionsWindow.Context.font = menuFont;
+      //simOptionsWindow.Context.fillStyle = "DarkBlue";
+      //simOptionsWindow.Context.fillRect(menuWidth, menuHeight, menuWidth, menuHeight);
+      //simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - menuHeight, menuWidth, menuHeight);
+      //simOptionsWindow.Context.fillStyle = "white";
+      //simOptionsWindow.Context.textBaseline = "top";
+      //simOptionsWindow.Context.fillText(screenMenus[0], 0, simOptionsWindow.CanvasHeight - menuHeight);//start - 80px
+      //simOptionsWindow.Context.fillText(screenMenus[0], menuWidth, menuHeight);//start - 80px
+      //simOptionsWindow.Context.fillText(screenMenus[3], menuWidth, menuHeight*1.2);//load - 160px
+      //simOptionsWindow.Context.fillText(screenMenus[4], menuWidth, menuHeight*1.4);//options - 240px
+      //exit is not needed when the game is not started ... pretty obvious, isn't it?
+      //break;
+    case 1: 
       simOptionsWindow.Context.setTransform(1,0,0,1,0,0);
       simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
       //telemetryWindow.Context.clearRect(0, 0, telemetryWindow.CanvasWidth, telemetryWindow.CanvasHeight); //do not clear the telemetryWindow or at the end bot data will be cleared
@@ -864,21 +890,16 @@ function drawMenus(menuEvent) {
       simOptionsWindow.Context.fillStyle = "white";
       simOptionsWindow.Context.textBaseline = "top";
       simOptionsWindow.Context.fillText(screenMenus[0], 0, simOptionsWindow.CanvasHeight - menuHeight);//start - 80px
-      //simOptionsWindow.Context.fillText(screenMenus[0], menuWidth, menuHeight);//start - 80px
-      //simOptionsWindow.Context.fillText(screenMenus[3], menuWidth, menuHeight*1.2);//load - 160px
-      //simOptionsWindow.Context.fillText(screenMenus[4], menuWidth, menuHeight*1.4);//options - 240px
-      //exit is not needed when the game is not started ... pretty obvious, isn't it?
-      break;
-    case 1: break; //running
-    case 2: //finished or paused, whatever i can't fight this logic right now
+      break; //running
+    //case 2: //finished or paused, whatever i can't fight this logic right now
       //simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
-      simOptionsWindow.Context.font = menuFont;
-      simOptionsWindow.Context.fillStyle = "DarkBlue";
+      //simOptionsWindow.Context.font = menuFont;
+      //simOptionsWindow.Context.fillStyle = "DarkBlue";
       //simOptionsWindow.Context.fillRect(menuWidth, menuHeight, menuWidth, menuHeight);
-      simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - menuHeight, menuWidth, menuHeight);
-      simOptionsWindow.Context.fillStyle = "white";
-      simOptionsWindow.Context.textBaseline = "top";
-      simOptionsWindow.Context.fillText(screenMenus[0], 0, simOptionsWindow.CanvasHeight - menuHeight);//start - 80px
+      //simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - menuHeight, menuWidth, menuHeight);
+      //simOptionsWindow.Context.fillStyle = "white";
+      //simOptionsWindow.Context.textBaseline = "top";
+      //simOptionsWindow.Context.fillText(screenMenus[0], 0, simOptionsWindow.CanvasHeight - menuHeight);//start - 80px
       //simOptionsWindow.Context.fillText(screenMenus[0], menuWidth, menuHeight);//start - 80px
       //simOptionsWindow.Context.fillText(screenMenus[1], menuWidth, menuHeight);//restart - 80px
       //simOptionsWindow.Context.fillText(screenMenus[5], menuWidth, menuHeight*1.2);//exit - 160px
@@ -887,11 +908,11 @@ function drawMenus(menuEvent) {
       //simOptionsWindow.Context.fillText(screenMenus[3], menuWidth, menuHeight*1.4);//load - 240px
       //simOptionsWindow.Context.fillText(screenMenus[4], menuWidth, menuHeight*1.6);//options - 320px
       //simOptionsWindow.Context.fillText(screenMenus[5], menuWidth, menuHeight*1.8);//exit - 400px
-      break;
+      //break;
   }
 }
 
-// this detects collisions between all objects we created
+//detect collisions between all objects we created
 function detectCollisions() { //used in updateWorld() //Disabled for now, should be an option
   // //collWorker.postMessage([pl1]);
   // //the problem with not moving units during formation time is probably the angle of the two colliding units - they are equal
@@ -952,21 +973,23 @@ function detectCollisions() { //used in updateWorld() //Disabled for now, should
   // }
 }
 
-// this updates current coordinates of the bots
+//update current coordinates of the bots
 function updateWorld() {
-  if (sim.runningBots === 0) { //check if we have any active bots so we can continue the simulation
-    sim.state = 0; //tell the engine that the sim was ended
+  //if (sim.runningBots === 0) { //check if we have any active bots so we can continue the simulation
+    //sim.state = 0; //tell the engine that the sim was ended
     //add here some stats logic
-    console.log("Race finished");
-    for (var i = 0; i < sim.bots.length; i++) {
-      console.log("Bot " + i + ": " + parseFloat(sim.bots[i].time*0.001).toFixed(3) + " seconds | " + parseFloat(sim.bots[i].distanceTravelled).toFixed(3) + " meters travelled");
-    }
-    return; //maybe it's better to early exit from the function, execution of the conditions below is useless
-  }
+    //console.log("Race finished");
+    //for (var i = 0; i < sim.bots.length; i++) {
+      //console.log("Bot " + i + " finished in " + parseFloat(sim.bots[i].time*0.001).toFixed(3) + " seconds | " + parseFloat(sim.bots[i].distanceTravelled).toFixed(3) + " meters travelled");
+    //}
+    //return; //maybe it's better to early exit from the function, execution of the conditions below is useless
+  //}
   
   sim.updateTime = performance.now().toFixed(3);
-  for (var i = 0; i < sim.bots.length; i++) {
-    sim.bots[i].updateBot();
+  if (sim.runningBots > 0) {
+    for (var i = 0; i < sim.bots.length; i++) {
+      sim.bots[i].updateBot();
+    }
   }
   sim.updateTime = ~~(performance.now().toFixed(3) - sim.updateTime);
   
@@ -974,7 +997,7 @@ function updateWorld() {
   //detectCollisions(); //Disabled for now, should be an option
 }
 
-// this is our rendering function
+//draw everything in order
 function renderWorld(passDeltaTime) { //drawing order of our objects: map->units->UI
   clearFrame(); //clear the canvas
   drawRacetrack(); //draw checkpoints of the current route
@@ -994,18 +1017,20 @@ var currentState = 0;
 var state = 0;
 sim.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution*/
 
-// this is our engine's loop
+//engine's main loop
 function main() {
-  if (sim.state === 0) { //draw menus if the game is not running
+  /*if (sim.state === 0) { //draw menus if the game is not running
     sim.botIdCounter = 0; 
     sim.bots = [];
     sim.runningBots = 0;
     sim.startTime = 0;
     drawMenus(0);
     return;
-  }
+  }*/
   
-  if (sim.state === 1) { //check if the sim is running and continuously loops it
+  if (sim.runningBots > 0) {
+  //if (sim.state === 1) { //check if the sim is running and continuously loops it
+    //if (sim.runningBots === 0) { sim.timeStep = 10; } else { sim.timeStep = 0.01667; }
     requestAnimationFrame(main); //first step is to draw so first update will be always drawn
     sim.currentTime = performance.now(); //get the current time needed for our engine
     sim.timeDiff = (abs(sim.currentTime - sim.lastTime) * 0.001);
@@ -1025,7 +1050,7 @@ function main() {
     //IMPORTANT - makes wobbly units but adds interpolation
     renderWorld(sim.dTime / sim.timeProduct);
     sim.lastTime = sim.currentTime;
-  }
+  } else { requestAnimationFrame(main); }
   
   //exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
   //currentState and previousState maybe are current and previous position of our bots, in fact idk
@@ -1056,16 +1081,17 @@ function main() {
     requestAnimationFrame(main);
   }*/
   
-  if (sim.state === 2) { drawMenus(2); return; } //draw menus if the game is paused
+  //if (sim.state === 2) { drawMenus(2); return; } //draw menus if the game is paused
 }
 
-// this section loads all event listeners and our engine when the page is loaded
+//load all event listeners and our engine when the page is loaded
 document.body.onload = function() {
-  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detects pressed keys
-  window.addEventListener('contextmenu', function(event){mouseEvents(event)}, false); //disables right-click menu in canvas
-  window.addEventListener('mousedown', function(event){mouseEvents(event)}, false); //detects pressed mouse buttons
-  window.addEventListener('mousemove', function(event){mouseEvents(event)}, false); //detects mouse movement
-  window.addEventListener('mouseup', function(event){mouseEvents(event)}, false); //detects realeased mouse buttons
+  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detect pressed keys
+  window.addEventListener('contextmenu', function(event){mouseEvents(event)}, false); //disable right-click menu in canvas
+  window.addEventListener('mousedown', function(event){mouseEvents(event)}, false); //detect pressed mouse buttons
+  window.addEventListener('mousemove', function(event){mouseEvents(event)}, false); //detect mouse movement
+  window.addEventListener('mouseup', function(event){mouseEvents(event)}, false); //detect realeased mouse buttons
+  drawMenus(1);
   main(); //and finally let's load our engine
 };
 
