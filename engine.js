@@ -33,9 +33,10 @@ UP: 38, RIGHT: 39, DOWN: 40, INSERT: 45, DELETE: 46, F1: 112, F2: 113, F3: 114, 
 F5: 116, F6: 117, F7: 118, F8: 119, F9: 120, F10: 121, F11: 122, F12: 123, W: 87, A: 65,
 S: 83, D: 68, NUMLOCK: 144, SCROLLLOCK: 145},
 blockedKeys = [19, 32, 37, 38, 39, 40], //arrows, space, pause
-specialKeysState = {SHIFT: false, CTRL: false, ALT: false}, //shift, ctrl, alt
-mainRatio = 12,
-screenMenus = ["ADD BOT"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
+specialKeysState = {SHIFT: false, CTRL: false, ALT: false}; //shift, ctrl, alt
+
+var mainRatio = 12;
+var screenMenus = ["CREATE SLOW BOT", "CREATE FAST BOT"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
 var baseText = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-*/=%";
 var baseTextLength = baseText.length;
 var sortedMenus = screenMenus;
@@ -45,7 +46,7 @@ var menusHeightAreas = {start: 0, resume: 0, save: 0, load: 0, options: 0, exit:
 var fontSize = "1em"; //1em is 16px
 var fontFamily = "Arial";
 var menuFont = fontSize + " " + fontFamily;
-var menuHeight = screenMenus.length * 16;
+var menuHeight = 16; //16px or 1em
 menusHeightAreas.start = fontSize[0] * 16; //fontSize[0] is first letter of a string, get area of 'Start' for the mouse keydown event
 var menusTextHeight = fontSize[0] * 16;
 /* -------------------------------------------------------------------------- */
@@ -72,6 +73,8 @@ var min = Math.min;
 var max = Math.max;
 var abs = Math.abs;
 var round = Math.round;
+/* -------------------------------------------------------------------------- */
+var guidanceError = 5; //in degrees
 /* -------------------------------------------------------------------------- */
 
 function detectKeys(event) {
@@ -213,7 +216,7 @@ for (var a = 0; a < targetCount; a++) {
 /*var mapTexture = new Image();
 mapTexture.src = "maptexture_test1.png";*/
 
-//main Bot object
+//Bot object
 var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
   this.position = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.destination = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
@@ -224,28 +227,29 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.roll = 0; //in degrees?
   this.yaw = 0; //in degrees?
   this.heading = 0; //in degrees, 0 - East
+  this.rollRate = (400 / 1000) * 16.67; //400 degrees roll rate in second or 0.4 deg per 1 milisecond
+  this.yawRate = (400 / 1000) * 16.67; //temporarily same as rollRate
+  this.pitchRate = (400 / 1000) * 16.67; //temporarily same as rollRate
   this.dragCoeff = dragpoints * 0.0001;
   this.thrust = thrust; //in kgf
   this.fuel = fuel; //in liters
   this.mass = mass; //in kg
   this.loadedMass = this.fuel + this.mass; //in kg
+  this.PowerToWeightRatio = this.thrust / this.loadedMass; //needed for guidance control system multiplier
   this.height = height; //in m
-  this.acceleration = this.thrust / this.loadedMass; //acceleration in m/s
+  this.acceleration = (this.thrust / this.loadedMass) * sim.timeStep; //acceleration in m/s
   this.oldAcceleration = 0;
   this.velocity = {x: 0, y: 0, z: 0}; //maybe needed for proper integration
   this.speed = 0; //current speed in m/s
   this.wingSpan = wingspan; //in m
   this.wingArea = wingarea; //in sq.m
-  this.wingLoading = this.loadedMass / this.wingArea; //in kg/sq.m
+  this.wingLoading = (this.loadedMass / this.wingArea) * sim.timeStep; //in kg/sq.m
   this.wingType = wingtype; //1 - flat bottom, 2 - semi-symmetric, 3 - symmetric
   this.frontalArea = this.wingSpan * this.height; //in sq.m
   this.liftCoeff = 0;
   this.liftForce = 0; //in kN
   this.fuelConsumption = (this.thrust / 100) * 0.035; //0.035 litres per second, thrust * fuel consumption per second, for jet engine ~150kN ~35g fuel per second per 1kN or 100kg thrust
   this.trajectoryLine = traj;
-  this.rotationSpeedX = TAU / 100; //100 FPS (this is wrong and must be fixed), default is one minute (0.1667) or 1/60 degree
-  this.rotationSpeedY = TAU / 100;
-  this.rotationSpeedZ = TAU / 100;
   this.CoM = 0; //center of mass
   this.CoT = 0; //center of thrust
   this.CoL = 0; //center of lift
@@ -253,6 +257,8 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.color = botColor;
   this.id = sim.botIdCounter;
   this.target = 0;
+  this.targetAngleXY = 0;
+  this.targetAngleZ = 0;
   this.hasTarget = false;
   this.time = 0;
   this.startTime = 0;
@@ -300,34 +306,6 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
         this.time = performance.now() - this.startTime;
       }
       
-      //update bot state based on current fuel level
-      if (this.fuel >= this.fuelConsumption * sim.timeStep) { 
-        this.fuel -= this.fuelConsumption * sim.timeStep;
-        this.loadedMass -= this.fuelConsumption * sim.timeStep;
-        this.acceleration = (this.thrust*sim.timeStep) / this.loadedMass;
-      } else {
-        if (this.target <= targetCount) {
-          this.fuel = 0; //directly set fuel to 0 when it is < 0 or has some very low values ~0.050l
-          if (this.acceleration > 0) this.acceleration -= (this.thrust*sim.timeStep) / this.loadedMass;
-          if (this.acceleration < 0) this.acceleration = 0;
-        } else {
-            this.fuel = 0;
-            this.isTimed = false; //stop the stopwatch for our bot
-            this.state = false; //set state of our bot to inactive
-            sim.runningBots--; //remove our bot from the list with active bots
-            return; //maybe it's better to early exit from the function, execution of the conditions below is useless
-        }
-      }
-      
-      //after fuel check we can calculate all characteristics of our bot
-      this.wingLoading = this.loadedMass / this.wingArea;
-      this.liftCoeff = ((this.loadedMass * sim.currentGravity) / ((sim.airDensity / 2) * pow(this.acceleration, 2) * this.wingArea)) * sim.timeStep;
-      this.liftCoeff = isNaN(this.liftCoeff) ? 0 : this.liftCoeff;
-      this.liftForce = (this.liftCoeff * (0.5*(sim.airDensity * pow(this.acceleration, 2))) * this.wingArea) * sim.timeStep;
-      this.liftForce = isNaN(this.liftForce) ? 0 : this.liftForce;
-      
-      //if (this.id === 0) console.log("LiftForce - " + this.liftForce + " | LiftCoeff - " + this.liftCoeff);
-    
       //set destination coords for our bot only once for each destination
       if (this.hasTarget === false && this.state === true) {
         this.hasTarget = true;
@@ -337,219 +315,264 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
         console.log("Bot " + this.id + " locked on target " + this.target);
       }
       
-      //calculate the difference between current position and destination for each axis
-      if (this.state === true) {
-        var diffX = this.destination.x - this.position.x;
-        var diffY = this.destination.y - this.position.y;
-        var diffZ = this.destination.z - this.position.z;
-     
-        //calculate distance between our bot and it's current destination
-        //IMPORTANT - DO NOT REMOVE ~~ FROM HERE or bots stuck in checkpoints
-        //it seems that if ~~ is removed bots no more stuck, this happened after adding the 3rd axis
-        this.distance = hypot(diffX, diffY, diffZ); //perf tests show that using ~~ in front of Math.hypot() the code is 8% faster
+      //update bot state if there aren't new targets
+      if (this.target > targetCount) {
+        this.isTimed = false; //stop the stopwatch for our bot
+        this.state = false; //set state of our bot to inactive
+        sim.runningBots--; //remove our bot from the list with active bots
+        return; //maybe it's better to early exit from the function, execution of the conditions below is useless
+      }
 
-        //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
-        if (this.distance > 0) {
-          diffX = diffX / this.distance;
-          diffY = diffY / this.distance;
-          diffZ = diffZ / this.distance;
+      //update bot state based on current fuel level
+      if (this.fuel >= this.fuelConsumption * sim.timeStep) {
+        this.fuel -= this.fuelConsumption * sim.timeStep;
+        this.loadedMass -= this.fuelConsumption * sim.timeStep;
+        this.PowerToWeightRatio = this.thrust / this.loadedMass;
+        this.acceleration = (this.thrust / this.loadedMass) * sim.timeStep;
+      } else {
+        this.fuel = 0; //directly set fuel to 0 when it is < 0 or has some very low values ~0.050l
+        if (this.acceleration !== 0) this.acceleration = 0;
+      }
+      
+      //calculate wing loading and lift force
+      this.wingLoading = (this.loadedMass / this.wingArea) * sim.timeStep;
+      this.liftCoeff = ((this.loadedMass * sim.currentGravity) / ((sim.airDensity / 2) * pow(this.acceleration, 2) * this.wingArea)) * sim.timeStep;
+      this.liftCoeff = isNaN(this.liftCoeff) ? 0 : this.liftCoeff;
+      this.liftForce = (this.liftCoeff * (0.5*(sim.airDensity * pow(this.acceleration, 2))) * this.wingArea) * sim.timeStep;
+      this.liftForce = isNaN(this.liftForce) ? 0 : this.liftForce;
+      
+      //if (this.id === 0) console.log("LiftForce - " + this.liftForce + " | LiftCoeff - " + this.liftCoeff);
+      
+      //calculate the difference between current position and destination for each axis
+      var directionX = this.destination.x - this.position.x;
+      var directionY = this.destination.y - this.position.y;
+      var directionZ = this.destination.z - this.position.z;
+   
+      //calculate distance between our bot and it's current destination
+      //IMPORTANT - DO NOT REMOVE ~~ FROM HERE or bots stuck in checkpoints
+      //it seems that if ~~ is removed bots no more stuck, this happened after adding the 3rd axis
+      this.distance = hypot(directionX, directionY, directionZ); //perf tests show that using ~~ in front of Math.hypot() the code is 8% faster
+
+      //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
+      if (this.distance > 0) {
+        directionX = directionX / this.distance;
+        directionY = directionY / this.distance;
+        directionZ = directionZ / this.distance;
+      }
+      
+      var distanceFromOrigin = hypot(this.position.x, this.position.y, this.position.z);
+      
+      //check if our bot is still away from the target, remove jittering with >1 instead of 0
+      //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
+      //IMPORTANT - after adding air pressure, density and temp it seems that bot stuck again at the checkpoints
+      //so this is hardcoded workaround for distance
+      //you need to add this value to travelled distance to be correct
+      if (this.distance >= this.size) {
+        //find angle to the target in radians and convert it to degrees
+        //var targetAngleXY = atan2(directionY, directionX) * (180 / PI); //y BEFORE x!!!
+        //var targetAngleZ = atan(directionX/directionY) * (180 / PI);
+        //var targetAngleXY = acos(directionZ / this.distance) * (180 / PI);
+        //var targetAngleZ = atan2(directionY, directionX) * (180 / PI);
+        this.targetAngleXY = atan2(directionY, directionX) * (180 / PI);
+        this.targetAngleZ = acos(directionZ / distanceFromOrigin) * (180 / PI);
+        
+        //check if bot's altitude is higher than 0, ie to be always bigger than its size, this is a crash prevention
+        if (this.altitude <= this.size) {
+          this.pitch += this.pitchRate + this.size;
         }
         
-        //check if our bot is still away from the target, remove jittering with >1 instead of 0
-        //this should be fixed, distance > 1 is way too much to have precision in going through the middle of checkpoints
-        //IMPORTANT - after adding air pressure, density and temp it seems that bot stuck again at the checkpoints
-        //so this is hardcoded workaround for distance
-        //you need to add this value to travelled distance to be correct
-        if (this.distance >= this.size) {
-          //finds direction to the target in radians and convert it to degrees, y BEFORE x!!!
-          var targetAngleXY = atan2(diffY, diffX) * (180 / PI);
-          var targetAngleZ = atan(diffX/diffY) * (180 / PI);
-          //var targetAngleXY = acos(diffZ / this.distance) * (180 / PI);
-          //var targetAngleZ = atan2(diffY, diffX) * (180 / PI);
-          
-          //controls bot's altitude to be always bigger than its size, this is a crash prevention
-          if (this.altitude <= this.size) {
-            this.pitch += this.rotationSpeedZ + this.size;
-          }
-          
-          //controls direction and turning speed of our bot, turning speed 0.1667 is one minute or 1/60 degree
-          if (this.heading > targetAngleXY) {
-            this.heading -= (this.rotationSpeedX + this.rotationSpeedY) + 1;
-          } else if (this.heading < targetAngleXY) {
-            this.heading += (this.rotationSpeedX + this.rotationSpeedY) + 1;
-          }
-          //this.heading = targetAngleXY;
-          
-          if (this.pitch > targetAngleZ) {
-            this.pitch -= this.rotationSpeedZ + 1;
-          } else if (this.pitch < targetAngleZ) {
-            this.pitch += this.rotationSpeedZ + 1;
-          }
-          
-          //calculate velocities for each axis
-          this.velocity.x += diffX * this.acceleration * sim.timeStep;
-          this.velocity.y += diffY * this.acceleration * sim.timeStep;
-          this.velocity.z += diffZ * this.acceleration * sim.timeStep;
-          
-          //FIRST calculate Geopotential height
-          //this is gravity-adjusted altitude of our bot, using variation of the gravity with latitude and elevation
-          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-          sim.geopotentialHeight = (sim.earthRadius * this.altitude / (sim.earthRadius + this.altitude)) / 1000; //in kilometers
-          
-          //1st variant
-          //calculate current air temperature, in Kelvin
-          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-          if (sim.geopotentialHeight <= 11) { sim.airCurrentTemp = 288.15 - (6.5 * sim.geopotentialHeight); } // Troposphere
-          else if (sim.geopotentialHeight <= 20) { sim.airCurrentTemp = 216.65 - (6.5 * sim.geopotentialHeight); } // Stratosphere starts
-          else if (sim.geopotentialHeight <= 32) { sim.airCurrentTemp = 196.65 + sim.geopotentialHeight; }
-          else if (sim.geopotentialHeight <= 47) { sim.airCurrentTemp = 228.65 + 2.8 * (sim.geopotentialHeight - 32); }
-          else if (sim.geopotentialHeight <= 51) { sim.airCurrentTemp = 270.65 - (6.5 * sim.geopotentialHeight); }// Mesosphere starts
-          else if (sim.geopotentialHeight <= 71) { sim.airCurrentTemp = 270.65 - 2.8 * (sim.geopotentialHeight - 51); }
-          else if (sim.geopotentialHeight <= 84.85) { sim.airCurrentTemp = 214.65 - 2 * (sim.geopotentialHeight - 71); }
-          //geopotHeight must be less than 84.85 km
-          //2nd variant
-          //sim.airCurrentTemp = sim.airReferenceTemperature - (sim.airLapseRate*this.altitude) + 273.15; //in Kelvin
-          /*---------------------*/
-          var KelvinToRankine = sim.airCurrentTemp * 1.8; //in Rankine
-          
-          //calculate current air density and pressure
-          //NOTE - not sure if these equations are returning correct values
-          //1st variant
-          //sim.airPressure = sim.airReferencePressure * pow((1 - ((sim.airLapseRate*this.altitude)/288.15)), ((sim.currentGravity * sim.airMolarMass) / (sim.gasConstant * sim.airLapseRate)));
-          //2nd variant
-          //sim.airPressure = sim.airReferencePressure * exp((-sim.currentGravity*sim.airMolarMass*this.altitude)/(sim.gasConstant*sim.airCurrentTemp));
-          
-          //3rd variant, in Pascals
-          //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-          if (sim.geopotentialHeight <= 11) { sim.airPressure = 101325 * pow(288.15 / sim.airCurrentTemp, -5.255877); }
-          else if (sim.geopotentialHeight <= 20) { sim.airPressure = 22632.06 * exp(-0.1577 * (sim.geopotentialHeight - 11)); }
-          else if (sim.geopotentialHeight <= 32) { sim.airPressure = 5474.889 * pow(216.65 / sim.airCurrentTemp, 34.16319); }
-          else if (sim.geopotentialHeight <= 47) { sim.airPressure = 868.0187 * pow(228.65 / sim.airCurrentTemp, 12.2011); }
-          else if (sim.geopotentialHeight <= 51) { sim.airPressure = 110.9063 * exp(-0.1262 * (sim.geopotentialHeight - 47)); }
-          else if (sim.geopotentialHeight <= 71) { sim.airPressure = 66.93887 * pow(270.65 / sim.airCurrentTemp, -12.2011); }
-          else if (sim.geopotentialHeight <= 84.85) { sim.airPressure = 3.956420 * pow(214.65 / sim.airCurrentTemp, -17.0816); }
-          //altitude must be less than 86 km
-          sim.airDensity = (sim.airPressure * sim.airMolarMass) / (sim.gasConstant * sim.airCurrentTemp);
-          
-          //calculate current air pressure at bot's position
-          sim.airPressureX = 0.5 * sim.airDensity * pow(this.velocity.x, 2);
-          sim.airPressureY = 0.5 * sim.airDensity * pow(this.velocity.y, 2);
-          sim.airPressureZ = 0.5 * sim.airDensity * pow(this.velocity.z, 2);
-          
-          //calculate current air viscosity
-          sim.airViscosity = sim.airReferenceViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*KelvinToRankine) + sim.SutherlandConstant))*pow(KelvinToRankine/sim.RankineRefTemp, 3.2); //in centipose
+        //check heading and if needed change it using turning speed, turning speed 0.1667 is one minute or 1/60 degree
+        //uses Proportional Navigation algorithm, diff is set to global var guidanceError degrees, our multiplier is PowerToWeightRatio
+        //bigger PowerToWeightRatio, bigger course corrections
+        //faster bots have higher speed and hense energy so they need bigger course corrections (so their multiplier is bigger)
+        var diffHeadingTargetAngleXY = this.heading - this.targetAngleXY;
+        var diffPitchTargetAngleZ = this.pitch - this.targetAngleZ;
+        
+        if (diffHeadingTargetAngleXY >= guidanceError) {
+          this.heading -= this.yawRate * this.PowerToWeightRatio;
+        } else if (diffHeadingTargetAngleXY < guidanceError) {
+          this.heading += this.yawRate * this.PowerToWeightRatio;
+        }
+        //this.heading = this.targetAngleXY;
+        
+        if (diffPitchTargetAngleZ >= guidanceError) {
+          this.pitch -= this.pitchRate * this.PowerToWeightRatio;
+        } else if (diffPitchTargetAngleZ < guidanceError) {
+          this.pitch += this.pitchRate * this.PowerToWeightRatio;
+        }
+        
+        //calculate velocities for each axis
+        this.velocity.x += directionX * this.acceleration * sim.timeStep;
+        this.velocity.y += directionY * this.acceleration * sim.timeStep;
+        this.velocity.z += directionZ * this.acceleration * sim.timeStep;
+        
+        //FIRST calculate Geopotential height
+        //this is gravity-adjusted altitude of our bot, using variation of the gravity with latitude and elevation
+        //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+        sim.geopotentialHeight = (sim.earthRadius * this.altitude / (sim.earthRadius + this.altitude)) / 1000; //in kilometers
+        
+        //1st variant
+        //calculate current air temperature, in Kelvin
+        //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+        if (sim.geopotentialHeight <= 11) { sim.airCurrentTemp = 288.15 - (6.5 * sim.geopotentialHeight); } // Troposphere
+        else if (sim.geopotentialHeight <= 20) { sim.airCurrentTemp = 216.65 - (6.5 * sim.geopotentialHeight); } // Stratosphere starts
+        else if (sim.geopotentialHeight <= 32) { sim.airCurrentTemp = 196.65 + sim.geopotentialHeight; }
+        else if (sim.geopotentialHeight <= 47) { sim.airCurrentTemp = 228.65 + 2.8 * (sim.geopotentialHeight - 32); }
+        else if (sim.geopotentialHeight <= 51) { sim.airCurrentTemp = 270.65 - (6.5 * sim.geopotentialHeight); }// Mesosphere starts
+        else if (sim.geopotentialHeight <= 71) { sim.airCurrentTemp = 270.65 - 2.8 * (sim.geopotentialHeight - 51); }
+        else if (sim.geopotentialHeight <= 84.85) { sim.airCurrentTemp = 214.65 - 2 * (sim.geopotentialHeight - 71); }
+        //geopotHeight must be less than 84.85 km
+        //2nd variant
+        //sim.airCurrentTemp = sim.airReferenceTemperature - (sim.airLapseRate*this.altitude) + 273.15; //in Kelvin
+        /*---------------------*/
+        var KelvinToRankine = sim.airCurrentTemp * 1.8; //in Rankine
+        
+        //calculate current air density and pressure
+        //NOTE - not sure if these equations are returning correct values
+        //1st variant
+        //sim.airPressure = sim.airReferencePressure * pow((1 - ((sim.airLapseRate*this.altitude)/288.15)), ((sim.currentGravity * sim.airMolarMass) / (sim.gasConstant * sim.airLapseRate)));
+        //2nd variant
+        //sim.airPressure = sim.airReferencePressure * exp((-sim.currentGravity*sim.airMolarMass*this.altitude)/(sim.gasConstant*sim.airCurrentTemp));
+        
+        //3rd variant, in Pascals
+        //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
+        if (sim.geopotentialHeight <= 11) { sim.airPressure = 101325 * pow(288.15 / sim.airCurrentTemp, -5.255877); }
+        else if (sim.geopotentialHeight <= 20) { sim.airPressure = 22632.06 * exp(-0.1577 * (sim.geopotentialHeight - 11)); }
+        else if (sim.geopotentialHeight <= 32) { sim.airPressure = 5474.889 * pow(216.65 / sim.airCurrentTemp, 34.16319); }
+        else if (sim.geopotentialHeight <= 47) { sim.airPressure = 868.0187 * pow(228.65 / sim.airCurrentTemp, 12.2011); }
+        else if (sim.geopotentialHeight <= 51) { sim.airPressure = 110.9063 * exp(-0.1262 * (sim.geopotentialHeight - 47)); }
+        else if (sim.geopotentialHeight <= 71) { sim.airPressure = 66.93887 * pow(270.65 / sim.airCurrentTemp, -12.2011); }
+        else if (sim.geopotentialHeight <= 84.85) { sim.airPressure = 3.956420 * pow(214.65 / sim.airCurrentTemp, -17.0816); }
+        //altitude must be less than 86 km
+        sim.airDensity = (sim.airPressure * sim.airMolarMass) / (sim.gasConstant * sim.airCurrentTemp);
+        
+        //calculate current air pressure at bot's position
+        sim.airPressureX = 0.5 * sim.airDensity * pow(this.velocity.x, 2);
+        sim.airPressureY = 0.5 * sim.airDensity * pow(this.velocity.y, 2);
+        sim.airPressureZ = 0.5 * sim.airDensity * pow(this.velocity.z, 2);
+        
+        //calculate current air viscosity
+        sim.airViscosity = sim.airReferenceViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*KelvinToRankine) + sim.SutherlandConstant))*pow(KelvinToRankine/sim.RankineRefTemp, 3.2); //in centipose
 
-          //IMPORTANT - adding and drag to equation makes bots when reaching the destination to jump from it
-          //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping and travelled distance is somewhat CORRECT!!!
-          
-          //calculate the Reynolds number so to use the correct drag law
-          sim.kinematicViscosity = sim.airViscosity / sim.airDensity;
-          sim.ReynoldsNumber = (this.acceleration * this.size) / sim.kinematicViscosity;
-          
-          //choose which drag law to use
-          if (sim.ReynoldsNumber < 1) {
-            //for low velocity, linear drag or laminar flow
-            var dragX = 6 * PI * sim.airViscosity * this.size * this.velocity.x;
-            var dragY = 6 * PI * sim.airViscosity * this.size * this.velocity.y;
-            var dragZ = 6 * PI * sim.airViscosity * this.size * this.velocity.z;
-          } else {
-            //for high velocity, quadratic drag or turbulent flow
-            var dragX = sim.airPressureX * this.dragCoeff * this.frontalArea;
-            var dragY = sim.airPressureY * this.dragCoeff * this.frontalArea;
-            var dragZ = sim.airPressureZ * this.dragCoeff * this.frontalArea;
-          }
-          dragX = (isNaN(dragX) ? 0 : dragX*sim.timeStep);
-          dragY = (isNaN(dragY) ? 0 : dragY*sim.timeStep);
-          dragZ = (isNaN(dragZ) ? 0 : dragZ*sim.timeStep);
-          
-          //calculate actual Earth's gravity
-          var distanceFromEarthCenter = sim.earthRadius + this.position.z;
-          sim.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(distanceFromEarthCenter, 2));
-          sim.currentGravity = parseFloat(sim.currentGravity).toFixed(6);
-          
-          //move our bot, maybe a Verlet version?
-          //1st variant
-          //var stepX = (this.velocity.x - dragX + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragX)
-          //var stepY = (this.velocity.y - dragY + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragY)
-          //var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*sim.currentGravity*sim.timeStep)+(0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragZ) + liftForce - gravity (sim.gravity) 
-          //2nd variant
-          this.acceleration *= 0.5*sim.timeStep;
-          sim.currentGravity *= 0.5*sim.timeStep*sim.timeStep;
-          this.velocity.x += diffX * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
-          this.velocity.y += diffY * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
-          this.velocity.z += diffZ * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
-          var stepX = (this.velocity.x - dragX + this.acceleration);
-          var stepY = (this.velocity.y - dragY + this.acceleration);
-          var stepZ = (this.velocity.z - dragZ - sim.currentGravity + this.liftForce);// + this.acceleration);
-          this.position.x += stepX;
-          this.position.y += stepY;
-          this.position.z += stepZ;
-          this.oldAcceleration = this.acceleration;
-          
-          //calculate current speed and travelled distance of our bot
-          var tmp = hypot(stepX, stepY, stepZ); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
-          this.distanceTravelled += tmp;
-          this.speed = (tmp / sim.timeStep); //V = S / t, in m/s
-          this.altitude = this.position.z;
-          
-          //check if the bot is crashed
-          if (this.altitude <= 0 && this.isLanding === false) {
-            this.isTimed = false; //stop the stopwatch for our bot
-            this.state = false; //set state of our bot to inactive
-            this.hasTarget = false; //remove our bot's target state
-            this.distanceTravelled -= this.distanceBeforeFirstTarget;
-            sim.runningBots--; //remove our bot from the list with active bots
-            console.log("Bot " + this.id + " crashed at location [" + 
-                                parseFloat(this.position.x).toFixed(3) + ", " + 
-                                parseFloat(this.position.y).toFixed(3) + ", " + 
-                                parseFloat(this.position.z).toFixed(3) + "]");
-          }
-          //this console.log below is interesting
-          //seems current speed of the bot (to be precise distance travelled) and its acceleration based on aero formula thrust / mass ...
-          //... are not equal or almost equal, ie the speed sometimes is between 1 and 50% bigger than usual ...
-          //... or maybe the sim.dTime is not correct, dunno why
-          //console.log("bot " + i + " - " + this.acceleration + " | vxvyvz - " + Math.hypot(vx, vy, vz));
-          
-          //output all parameters for debugging, only for bot #0
-          /*if (this.id === 0) {
-            console.log("Speed "          + this.speed +
-                        " Altitude "       + this.altitude +
-                        " AirTemp "        + tempTemp +
-                        " AirDensity "     + sim.airDensity +
-                        " AirPressureX "    + sim.airPressureX +
-                        " AirPressureY "    + sim.airPressureY +
-                        " AirPressureZ "    + sim.airPressureZ +
-                        " AirViscosity "   + sim.airViscosity +
-                        " CGravity "       + sim.currentGravity
-                       );
-          }*/
+        //IMPORTANT - adding and drag to equation makes bots to jump from reached destination
+        //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping, and travelled distance is somewhat CORRECT!!!
+        
+        //calculate the Reynolds number so to use the correct drag law
+        sim.kinematicViscosity = sim.airViscosity / sim.airDensity;
+        sim.ReynoldsNumber = (this.acceleration * this.size) / sim.kinematicViscosity;
+        
+        //choose which drag law to use
+        if (sim.ReynoldsNumber < 1) {
+          //for low velocity, linear drag or laminar flow
+          var dragX = 6 * PI * sim.airViscosity * this.size * this.velocity.x;
+          var dragY = 6 * PI * sim.airViscosity * this.size * this.velocity.y;
+          var dragZ = 6 * PI * sim.airViscosity * this.size * this.velocity.z;
         } else {
-          if (this.target < targetCount - 1) { //check if our bot has more targets
-            this.hasTarget = false;
-            this.target++;
-            this.distanceTravelled += this.size;
-          } else { //or if hasn't ...
-            this.isTimed = false; //stop the stopwatch for our bot
-            this.state = false; //set state of our bot to inactive
-            this.hasTarget = false; //remove our bot's target state
-            this.distanceTravelled -= this.distanceBeforeFirstTarget;
-            sim.runningBots--; //remove our bot from the list with active bots
-            console.log("Bot " + this.id + " finished in " + parseFloat(this.time*0.001).toFixed(3) + " seconds | " + parseFloat(this.distanceTravelled).toFixed(3) + " meters travelled");
-          }
+          //for high velocity, quadratic drag or turbulent flow
+          var dragX = sim.airPressureX * this.dragCoeff * this.frontalArea;
+          var dragY = sim.airPressureY * this.dragCoeff * this.frontalArea;
+          var dragZ = sim.airPressureZ * this.dragCoeff * this.frontalArea;
+        }
+        dragX = (isNaN(dragX) ? 0 : dragX*sim.timeStep);
+        dragY = (isNaN(dragY) ? 0 : dragY*sim.timeStep);
+        dragZ = (isNaN(dragZ) ? 0 : dragZ*sim.timeStep);
+        
+        //calculate actual Earth's gravity
+        var distanceFromEarthCenter = sim.earthRadius + this.position.z;
+        sim.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(distanceFromEarthCenter, 2));
+        sim.currentGravity = parseFloat(sim.currentGravity).toFixed(6);
+
+        //move our bot, maybe a Verlet version?
+        //1st variant
+        //var stepX = (this.velocity.x - dragX + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragX)
+        //var stepY = (this.velocity.y - dragY + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragY)
+        //var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*sim.currentGravity*sim.timeStep)+(0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragZ) + liftForce - gravity (sim.gravity) 
+        //2nd variant
+        this.acceleration *= 0.5*sim.timeStep;
+        sim.currentGravity *= 0.5*sim.timeStep*sim.timeStep;
+        this.velocity.x += directionX * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+        this.velocity.y += directionY * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+        this.velocity.z += directionZ * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
+        var stepX = (this.velocity.x - dragX + this.acceleration);
+        var stepY = (this.velocity.y - dragY + this.acceleration);
+        var stepZ = (this.velocity.z - dragZ - sim.currentGravity + this.liftForce);// + this.acceleration);
+        this.position.x += stepX;
+        this.position.y += stepY;
+        this.position.z += stepZ;
+        this.oldAcceleration = this.acceleration;
+        
+        //calculate current speed and travelled distance of our bot
+        var tmp = hypot(stepX, stepY, stepZ); //IMPORTANT - DO NOT optimise with ~~ or speed and distance travelled will be wrong!!!
+        this.distanceTravelled += tmp;
+        this.speed = (tmp / sim.timeStep); //V = S / t, in m/s
+        this.altitude = this.position.z;
+        
+        //check if our bot crashed
+        if (this.altitude <= 0 && this.isLanding === false) {
+          this.isTimed = false; //stop the stopwatch for our bot
+          this.state = false; //set state of our bot to inactive
+          this.hasTarget = false; //remove our bot's target state
+          this.distanceTravelled -= this.distanceBeforeFirstTarget;
+          sim.runningBots--; //remove our bot from the list with active bots
+          console.log("Bot " + this.id + " crashed at location [" + 
+                              parseFloat(this.position.x).toFixed(3) + ", " + 
+                              parseFloat(this.position.y).toFixed(3) + ", " + 
+                              parseFloat(this.position.z).toFixed(3) + "]");
+        }
+        //this console.log below is interesting
+        //seems current speed of the bot (to be precise distance travelled) and its acceleration based on aero formula thrust / mass ...
+        //... are not equal or almost equal, ie the speed sometimes is between 1 and 50% bigger than usual ...
+        //... or maybe the sim.dTime is not correct, dunno why
+        //console.log("bot " + i + " - " + this.acceleration + " | vxvyvz - " + Math.hypot(vx, vy, vz));
+        
+        //output all parameters for debugging, only for bot #0
+        /*if (this.id === 0) {
+          console.log("Speed "          + this.speed +
+                      " Altitude "       + this.altitude +
+                      " AirTemp "        + tempTemp +
+                      " AirDensity "     + sim.airDensity +
+                      " AirPressureX "    + sim.airPressureX +
+                      " AirPressureY "    + sim.airPressureY +
+                      " AirPressureZ "    + sim.airPressureZ +
+                      " AirViscosity "   + sim.airViscosity +
+                      " CGravity "       + sim.currentGravity
+                     );
+        }*/
+      } else {
+        if (this.target < targetCount - 1) { //check if our bot has more targets
+          this.hasTarget = false;
+          this.target++; //bot went through another target
+          //this.distanceTravelled += this.size; //temporarily disabled
+        } else { //or if hasn't ...
+          this.isTimed = false; //stop the stopwatch for our bot
+          this.state = false; //set state of our bot to inactive
+          this.hasTarget = false; //remove our bot's target state
+          this.distanceTravelled -= this.distanceBeforeFirstTarget;
+          sim.runningBots--; //remove our bot from the list with active bots
+          console.log("Bot " + this.id + " finished in " + parseFloat(this.time*0.001).toFixed(3) + " seconds | " + parseFloat(this.distanceTravelled).toFixed(3) + " meters travelled");
         }
       }
     }
   };
 };
 
-//create a couple of bots
-function spawnBots() {
+//create a fast bot
+function spawnFastBot() {
   //(botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj)
-  sim.bots.push(new Bot("red", 100, 15000, 5000, 5, 15, 70, 1, 1000, false));
-  sim.bots.push(new Bot("green", 100, 12000, 5000, 5, 15, 70, 1, 1000, false));
-  
-  //create 10 random bots for testing
-  /*for (var i = 0; i < 10; i++) {
+  sim.bots.push(new Bot("red", 100, 15000, 500, 5, 15, 70, 1, 1000, false));
+  console.log("A fast bot was created");
+}
+
+//create a slow bot
+function spawnSlowBot() {
+  //(botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj)
+  sim.bots.push(new Bot("green", 100, 10000, 500, 5, 15, 70, 1, 1000, false));
+  console.log("A slow bot was created");
+}
+
+//create N random bots for testing
+/*function spawnRandomBots(numOfBots) {
+  for (var i = 0; i < numOfBots; i++) {
     sim.bots.push(new Bot('#'+random().toString(16).slice(-6), //color based on http://stackoverflow.com/a/5365036/1196983
                                                                         100, //dragpoints
                                                                         15000, //thrust
@@ -560,8 +583,8 @@ function spawnBots() {
                                                                         1, //wingtype
                                                     (random()*100)+1, //fuel
                                                                         false)); //enable or disable trajectory drawing
-  }*/
-}
+  }
+}*/
 
 //restart our simulation
 function restartSim() {
@@ -600,18 +623,21 @@ function mouseEvents(event) {
     sim.mouseY = Math.abs(event.clientY - racetrackWindow.Rect.top - racetrackWindow.BorderWidth);
     sim.mouseTarget = racetrackWindow.Canvas;*/
   }
-  
-  if (event.target === simOptionsWindow.Canvas) {
+  else if (event.target === simOptionsWindow.Canvas) {
     sim.mouseX = abs(event.clientX - simOptionsWindow.Rect.left - simOptionsWindow.BorderWidth);
     sim.mouseY = abs(event.clientY - simOptionsWindow.Rect.top - simOptionsWindow.BorderWidth);
     sim.mouseTarget = simOptionsWindow.Canvas;
   }
-  
-  if (event.target === telemetryWindow.Canvas) {
+  else if (event.target === telemetryWindow.Canvas) {
     event.preventDefault(); event.stopPropagation();
     //sim.mouseX = Math.abs(event.clientX - telemetryWindow.Rect.left - telemetryWindow.BorderWidth) * gameInterface.ratio; //idk if Rect.left should be Rect.right, cause minimap has CSS pos right
     //sim.mouseY = Math.abs(event.clientY - telemetryWindow.Rect.top - telemetryWindow.BorderWidth) * gameInterface.ratio;
     //sim.mouseTarget = telemetryWindow.Canvas;
+  }
+  else {
+    event.preventDefault(); event.stopPropagation();
+    //FIXED: a bug where the user can spawn a bot even when the mouse is not on 'Create FAST/SLOW BOT' buttons
+    sim.mouseY = 0; sim.mouseY = 0;
   }
   
   switch (event.type) {
@@ -643,7 +669,14 @@ function mouseEvents(event) {
       if (sim.state === 1) { //get mouse click coordinates
         if (sim.mKey === 1) { //detect start of using selection rectangle or single unit selection
           event.preventDefault(); event.stopPropagation();
-          spawnBots();
+          
+          if (sim.mouseY > 480 && sim.mouseY < 496) {
+            spawnFastBot();
+          }
+          
+          if (sim.mouseY > 496) {
+            spawnSlowBot();
+          }
         }
         if (sim.mKey === 2) { //detect mid button click for map scroll
           event.preventDefault(); event.stopPropagation();
@@ -802,6 +835,8 @@ function drawStats() {
                       "    destinationZ: " +         parseInt(sim.bots[i].destination.z),
                       "    target: " +                        sim.bots[i].target, 
                       "    active: " +                        sim.bots[i].state, 
+                      "    XYangle: " +                       sim.bots[i].targetAngleXY, 
+                      "    Zangle: " +                        sim.bots[i].targetAngleZ, 
                       "    speed: " +              parseFloat(sim.bots[i].speed).toFixed(3) + " m/s",
                       "    fuel: " +               parseFloat(sim.bots[i].fuel).toFixed(3) + " litres",
                       "    weight: " +             parseFloat(sim.bots[i].loadedMass).toFixed(3) + " kgs",
@@ -882,14 +917,15 @@ function drawMenus(menuEvent) {
     case 1: 
       simOptionsWindow.Context.setTransform(1,0,0,1,0,0);
       simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
-      //telemetryWindow.Context.clearRect(0, 0, telemetryWindow.CanvasWidth, telemetryWindow.CanvasHeight); //do not clear the telemetryWindow or at the end bot data will be cleared
       simOptionsWindow.Context.font = menuFont;
-      simOptionsWindow.Context.fillStyle = "DarkBlue";
-      //simOptionsWindow.Context.fillRect(menuWidth, menuHeight, menuWidth, menuHeight);
-      simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - menuHeight, menuWidth, menuHeight);
-      simOptionsWindow.Context.fillStyle = "white";
-      simOptionsWindow.Context.textBaseline = "top";
-      simOptionsWindow.Context.fillText(screenMenus[0], 0, simOptionsWindow.CanvasHeight - menuHeight);//start - 80px
+      for (var i = 0; i < screenMenus.length; i++) {
+        simOptionsWindow.Context.fillStyle = "DarkBlue";
+        //simOptionsWindow.Context.fillRect(menuWidth, menuHeight, menuWidth, menuHeight);
+        simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - (menuHeight*(1+i)), menuWidth, menuHeight);
+        simOptionsWindow.Context.fillStyle = "white";
+        simOptionsWindow.Context.textBaseline = "top";
+        simOptionsWindow.Context.fillText(screenMenus[i], 0, simOptionsWindow.CanvasHeight - (menuHeight*(1+i)));
+      }
       break; //running
     //case 2: //finished or paused, whatever i can't fight this logic right now
       //simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
@@ -1104,5 +1140,6 @@ document.body.onload = function() {
 5. Projectiles for dogfight/evasion modes
 6. Aftermath statistics
 7. Sim controls
+8. To learn the retarded Git commands. Do not forget your passphrase, folks!
 */
 /* ------------------------------- TODO SECTION ----------------------------- */
