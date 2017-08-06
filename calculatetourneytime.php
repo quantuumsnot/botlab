@@ -29,7 +29,7 @@ if (isset($argv[2]) && is_numeric($argv[2]) && !is_float($argv[2]) && in_array($
   echo "\nNumber of average time per competitor must be between 2 and 180 seconds, defaulted to 180";
 }
 
-$battles = $competitors - 1; //the winner is the only one who plays against all players, so battlecount is $competitors - 1
+$battles = $competitors - 1; //the winner is the only one who plays all battles, so battlecount is $competitors - 1
 $avgTime = $battles * $avgRunTimePerCompetitor;
 $maxTime = $battles * 180;
 
