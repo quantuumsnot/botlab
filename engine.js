@@ -4,6 +4,9 @@
 
 'use strict'; //meh
 
+//check browser for using specific supported features
+var isChromium = !!window.chrome;
+
 /* ------------------- Units of measurement reference table ----------------- */
 /* Units - Forces - Moment - Acceleration - Velocity - Position - Mass - Inertia */
 //Metric - Newton - Newtonmeter - Meters per second squared - Meters per second - Meters - Kilogram - Kilogram meter squared
@@ -36,7 +39,7 @@ blockedKeys = [19, 32, 37, 38, 39, 40], //arrows, space, pause
 specialKeysState = {SHIFT: false, CTRL: false, ALT: false}; //shift, ctrl, alt
 
 var mainRatio = 12;
-var screenMenus = ["CREATE FAST BOT", "CREATE SLOW BOT", "CREATE GENERIC BOT"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
+var screenMenus = ["CREATE FAST BOT", "CREATE SLOW BOT", "CREATE GENERIC BOT", "CREATE RANDOM BOTS"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
 var baseText = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-*/=%";
 var baseTextLength = baseText.length;
 var sortedMenus = screenMenus;
@@ -80,42 +83,44 @@ var guidanceError = 5 * Deg2Rad; //5 in degrees, converted to Radians
 /* -------------------------------------------------------------------------- */
 
 function detectKeys(event) {
+  event.preventDefault(); event.stopPropagation();
   var key = event.keyCode || event.which; //alternative to ternary - if there is no keyCode, use which
-  if (blockedKeys.indexOf(key) !== undefined) { //prevents scrolling of browser's viewport with the keys, f5 not working (fixed at the end of the function)
-    event.preventDefault(); event.stopPropagation();
-    if (sim.state === 1) { //Ctrl + A
+  //prevents scrolling of browser's viewport with the keys, f5 not working (fixed at the end of the function)
+  /*if (blockedKeys.indexOf(key) !== undefined) {
+    if (sim.state === 1) { //Ctrl + A, selecting all bots ???
       if (key == 65 && event.ctrlKey) {
         //;
       }
     }
-    switch (key) { //19 - pause, 32 - space, 37 - left, 38 - up, 39 - right, 40 - down
-      case 19:
-        switch (sim.state) {
-          case 0: break;
-          case 1: sim.state = 2; break;
-          case 2: sim.state = 1; main(); break;
-        }
-        break;
-      case 32: //currently we are using space for easier restart of our simulation
-        switch (sim.state) {
-          case 0: 
-            sim.botIdCounter = 0; 
-            sim.bots = [];
-            sim.runningBots = 0;
-            sim.startTime = 0;
-            spawnBots();
-            sim.state = 1;
-            main();
-            break;
-          case 1:
-            restartSim();
-            break;
-          case 2: 
-            restartSim();
-            break;
-        }
-        break;
-    }
+  }*/
+  
+  switch (key) { //19 - pause, 32 - space, 37 - left, 38 - up, 39 - right, 40 - down
+    case 19:
+      switch (sim.state) {
+        case 0: break;
+        case 1: sim.state = 2; break;
+        case 2: sim.state = 1; main(); break;
+      }
+      break;
+    case 32: //currently we are using space for easier restart of our simulation
+      switch (sim.state) {
+        case 0: 
+          sim.botIdCounter = 0; 
+          sim.bots = [];
+          sim.runningBots = 0;
+          sim.startTime = 0;
+          spawnRandomBots();
+          sim.state = 1;
+          main();
+          break;
+        case 1:
+          restartSim();
+          break;
+        case 2: 
+          restartSim();
+          break;
+      }
+      break;
   }
   if (key === definedKeys.F5) { document.location.reload(true); } //fixes 'f5 not working' issue
 }
@@ -237,7 +242,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.yawRate = 400 * Deg2Rad * sim.timeStep; //temporarily same as rollRate, converted to Radians
   this.pitchRate = 400 * Deg2Rad * sim.timeStep; //temporarily same as rollRate, converted to Radians
   this.dragCoeff = dragpoints * 0.0001; //TODO: find why I multiply by 0.0001 //FOUND: if 0.0001 is removed the bot crashes very fast
-  this.dragForce = 0;
+  this.dragForce = Number.EPSILON;
   this.thrust = thrust; //in kgf
   this.fuel = fuel; //in liters
   this.mass = mass; //in kg
@@ -248,6 +253,8 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.oldAcceleration = 0;
   this.velocity = {x: 0, y: 0, z: 0}; //maybe needed for proper integration
   this.speed = 0; //current speed in m/s
+  this.momentOfInertia = 0.4 * this.loadedMass * wingspan * wingspan; //solid sphere inertia formula is from https://en.wikipedia.org/wiki/List_of_moments_of_inertia
+  //check also https://www.toptal.com/game/video-game-physics-part-i-an-introduction-to-rigid-body-dynamics
   this.wingSpan = wingspan; //in m
   this.wingArea = wingarea; //in sq.m
   this.wingLoading = (this.loadedMass / this.wingArea) * sim.timeStep; //in kg/sq.m
@@ -290,7 +297,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     this.startPosDiffY /= this.startPosDistance;
     this.startPosDiffZ /= this.startPosDistance;
   }
-  this.startPosAngle = atan2(this.startPosDiffY, this.startPosDiffX); //startPosDiffY must be first!!!
+  this.startPosAngle = atan2(-this.startPosDiffY, this.startPosDiffX); //startPosDiffY must be first!!!
   this.heading = this.startPosAngle;
   if (this.startPosAngle > 0) { this.heading /= this.startPosAngle; } //dunno if we must normalize the heading angle
   //IMPORTANT: Rly can't remember why I'm dividing startPosAngle by 180*PI
@@ -363,9 +370,11 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.checkTargets = function() {
     //IMPORTANT: after adding air pressure, density and temp it seems that bot stuck again at the checkpoints
     if (this.target < targetCount - 1) { //check if our bot has more targets
-      this.hasTarget = false;
-      this.target++; //bot went through another target
-      //this.distanceTravelled += this.size; //temporarily disabled
+      if (this.distance <= this.size) {
+        this.hasTarget = false;
+        this.target++; //bot went through another target
+        //this.distanceTravelled += this.size; //temporarily disabled
+      }
     } else { //or if hasn't ...
       this.isTimed = false; //stop the stopwatch for our bot
       this.state = false; //set state of our bot to inactive
@@ -388,9 +397,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     this.distance = hypot(this.direction.x, this.direction.y, this.direction.z); //perf tests show that using ~~ in front of Math.hypot() the code is 8% faster
     
     //check if the bot is still away from the target, possible jittering near the target
-    if (this.distance <= this.size) {
-      this.checkTargets();
-    }
+    this.checkTargets();
 
     //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
     this.direction.x /= this.distance;
@@ -549,11 +556,11 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   
   this.updateGuidanceSystem = function() {
     //find angle to the target in radians and convert it to degrees
-    //var targetAngleXY = atan2(directionY, directionX) * (180 / PI); //y BEFORE x!!!
+    //var targetAngleXY = atan2(-directionY, directionX) * (180 / PI); //y BEFORE x!!!
     //var targetAngleZ = atan(directionX/directionY) * (180 / PI);
     //var targetAngleXY = acos(directionZ / this.distance) * (180 / PI);
-    //var targetAngleZ = atan2(directionY, directionX) * (180 / PI);
-    this.targetAngleXY = atan2(this.direction.y, this.direction.x);
+    //var targetAngleZ = atan2(-directionY, directionX) * (180 / PI);
+    this.targetAngleXY = atan2(-this.direction.y, this.direction.x);
     this.targetAngleZ = acos(this.direction.z / hypot(this.position.x, this.position.y, this.position.z));
     
     //uses Proportional Navigation algorithm, diff is set to global var guidanceError, our multiplier is PowerToWeightRatio
@@ -607,7 +614,7 @@ function spawnBot(type, botColor, dragpoints, thrust, mass, height, wingspan, wi
 }
 
 //create N random bots for testing
-/*function spawnRandomBots(numOfBots) {
+function spawnRandomBots(numOfBots) {
   for (var i = 0; i < numOfBots; i++) {
     sim.bots.push(new Bot('#'+random().toString(16).slice(-6), //color based on http://stackoverflow.com/a/5365036/1196983
                                                                         100, //dragpoints
@@ -620,7 +627,7 @@ function spawnBot(type, botColor, dragpoints, thrust, mass, height, wingspan, wi
                                                     (random()*100)+1, //fuel
                                                                         false)); //enable or disable trajectory drawing
   }
-}*/
+}
 
 //restart our simulation
 function restartSim() {
@@ -629,7 +636,7 @@ function restartSim() {
   sim.bots = [];
   sim.runningBots = 0;
   sim.startTime = 0;
-  spawnBots();
+  spawnRandomBots(3);
   sim.state = 1;
 }
 
@@ -653,8 +660,8 @@ function restartSim() {
 
 //detect mouse clicks
 function mouseEvents(event) {
+  event.preventDefault(); event.stopPropagation();
   if (event.target === racetrackWindow.Canvas) {
-    event.preventDefault(); event.stopPropagation();
     /*sim.mouseX = Math.abs(event.clientX - racetrackWindow.Rect.left - racetrackWindow.BorderWidth);
     sim.mouseY = Math.abs(event.clientY - racetrackWindow.Rect.top - racetrackWindow.BorderWidth);
     sim.mouseTarget = racetrackWindow.Canvas;*/
@@ -665,28 +672,21 @@ function mouseEvents(event) {
     sim.mouseTarget = simOptionsWindow.Canvas;
   }
   else if (event.target === telemetryWindow.Canvas) {
-    event.preventDefault(); event.stopPropagation();
     //sim.mouseX = Math.abs(event.clientX - telemetryWindow.Rect.left - telemetryWindow.BorderWidth) * gameInterface.ratio; //idk if Rect.left should be Rect.right, cause minimap has CSS pos right
     //sim.mouseY = Math.abs(event.clientY - telemetryWindow.Rect.top - telemetryWindow.BorderWidth) * gameInterface.ratio;
     //sim.mouseTarget = telemetryWindow.Canvas;
   }
   else {
-    event.preventDefault(); event.stopPropagation();
-    //FIXED: a bug where the user can spawn a bot even when the mouse is not on 'Create FAST/SLOW BOT' buttons
+    //FIXED: a bug where the user can spawn a bot even when the mouse is not on 'Create FAST/SLOW/GENERIC/RANDOM BOT' buttons
     sim.mouseY = 0; sim.mouseY = 0;
   }
   
   switch (event.type) {
-    case "contextmenu": event.preventDefault(); event.stopPropagation(); break;
     case "mouseup": 
-      if (sim.mKey === 1 && sim.state === 1) {
-        //;
-      }
+      if (sim.mKey === 1 && sim.state === 1) {}
       break;
     case "mousedown":
       sim.mKey = event.keyCode || event.which; // || event.button; 1- left button, 2 - mid button, 3 - right button
-      event.preventDefault();
-      event.stopPropagation();
       
       //if (sim.state === 0) { //detect click on Start in main menu
         //if (sim.mKey === 1) {
@@ -702,20 +702,15 @@ function mouseEvents(event) {
         //}
       //}
       
-      if (sim.state === 1) { //get mouse click coordinates
-        if (sim.mKey === 1) { //detect start of using selection rectangle or single unit selection
-          event.preventDefault(); event.stopPropagation();
-          
+      if (sim.state === 1) { //detect click on Sim Options window
+        if (sim.mKey === 1) {
+          if (sim.mouseY > 448 && sim.mouseY < 464) { spawnRandomBots(3); }
           if (sim.mouseY > 464 && sim.mouseY < 480) { spawnBot("generic"); }
           if (sim.mouseY > 480 && sim.mouseY < 496) { spawnBot("slow"); }
-          if (sim.mouseY > 496) { spawnBot("fast"); }
+          if (sim.mouseY > 496 && sim.mouseY < 512) { spawnBot("fast"); }
         }
-        if (sim.mKey === 2) { //detect mid button click for map scroll
-          event.preventDefault(); event.stopPropagation();
-        }
-        if (sim.mKey === 3) { //detect right button click
-          event.preventDefault(); event.stopPropagation();
-        }
+        if (sim.mKey === 2) {} //detect mid button click for map scroll
+        if (sim.mKey === 3) {} //detect right button click
       }
       
       //if (sim.state === 2) { //detects click on Exit or Resume in main menu
@@ -727,7 +722,7 @@ function mouseEvents(event) {
               //sim.bots = [];
               //sim.runningBots = 0;
               //sim.startTime = 0;
-              //spawnBots();
+              //spawnRandomBots(3);
               //sim.state = 1;
               //main();
               //break;
@@ -918,7 +913,9 @@ function drawEngineInfo() {
     var minVal = Infinity;
     //var maxVal = 0;
     //var heapLimit = performance.memory.jsHeapSizeLimit / 1048576; //this will be used for the graph
-    minVal = min(minVal, performance.memory.usedJSHeapSize / 1048576);
+    if (isChromium == true) { //IMPORTANT: performance.memory is supported only by Chromium
+      minVal = min(minVal, performance.memory.usedJSHeapSize / 1048576);
+    } else { minVal = 1; }
     //maxVal = min(maxVal, performance.memory.usedJSHeapSize / 1048576);
     sim.currentMem = round(minVal); // | " + round(minVal) + " MB | " + round(maxVal) + " MB";
     racetrackWindow.Context.fillStyle = "white";
@@ -926,9 +923,10 @@ function drawEngineInfo() {
     racetrackWindow.Context.textBaseline = "alphabetic";
     racetrackWindow.Context.fillText("FPS: " + sim.currentFPS, 4, 16); //FPS, 4px offset from top left corner
     racetrackWindow.Context.fillText("World updates: " + parseInt(sim.worldUpdates), 4, 32); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Render time (in ms): " + sim.renderTime, 4, 48); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Update time (in ms): " + sim.updateTime, 4, 64); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Memory usage (in MB): " + sim.currentMem, 4, 80); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Bots: " + sim.bots.length, 4, 48); //bot counter, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Render time (in ms): " + sim.renderTime, 4, 64); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Update time (in ms): " + sim.updateTime, 4, 80); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Memory usage (in MB): " + sim.currentMem, 4, 96); //ms, 4px offset from top left corner
   }
 }
 
@@ -966,6 +964,9 @@ function drawMenus(menuEvent) {
         }
         else if (screenMenus[i] === "CREATE SLOW BOT") {
           simOptionsWindow.Context.fillStyle = "Green";
+        }
+        else if (screenMenus[i] === "CREATE RANDOM BOTS") {
+          simOptionsWindow.Context.fillStyle = "Blue";
         }
         simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - (menuHeight*(1+i)), simOptionsWindow.CanvasWidth, menuHeight);
         simOptionsWindow.Context.fillStyle = "white";
@@ -1103,27 +1104,49 @@ function renderWorld(passDeltaTime) { //drawing order of our objects: map->units
 /* -------------------------------------------------------------------------- */
 
 // these vars are for FIX-YOUR-TIMESTEP solution
-/*var t = 0;
+//exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
+//currentState and previousState maybe are current and previous position of our bots, in fact idk
+/*
+var t = 0;
 var dt = 0.01;
 var accumulator = 0;
 var previousState = 0;
 var currentState = 0;
 var state = 0;
-sim.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution*/
+sim.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution
+
+function main() {
+  if (sim.runningBots > 0) {
+    requestAnimationFrame(main);
+  
+    while (true) {
+      var newTime = performance.now();
+      var frameTime = (newTime - sim.currentTime)*0.001;
+      
+      if (frameTime > dt) {
+        frameTime = dt;
+        currentTime = newTime;
+      }
+      
+      accumulator += frameTime;
+      
+      while (accumulator >= dt) {
+        previousState = currentState;
+        updateWorld(); //update the world
+        t += dt;
+        accumulator -= dt;
+      }
+      
+      var alpha = accumulator / dt;
+      
+      renderWorld(dt / (currentState * alpha + previousState * (1.0 - alpha)));
+    }
+  } else { requestAnimationFrame(main); }
+}*/
 
 //engine's main loop
 function main() {
-  /*if (sim.state === 0) { //draw menus if the game is not running
-    sim.botIdCounter = 0; 
-    sim.bots = [];
-    sim.runningBots = 0;
-    sim.startTime = 0;
-    drawMenus(0);
-    return;
-  }*/
-  
   if (sim.runningBots > 0) {
-    //if (sim.runningBots === 0) { sim.timeStep = 10; } else { sim.timeStep = 0.01667; }
     requestAnimationFrame(main); //first step is to draw so first update will be always drawn
     sim.currentTime = performance.now(); //get the current time needed for our engine
     sim.timeDiff = (abs(sim.currentTime - sim.lastTime) * 0.001);
@@ -1143,45 +1166,17 @@ function main() {
     sim.lastTime = sim.currentTime;
   } else { requestAnimationFrame(main); }
   
-  //exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
-  //currentState and previousState maybe are current and previous position of our bots, in fact idk
-  /*if (sim.state === 1) {
-    var newTime = performance.now().toFixed(3);
-    var frameTime = newTime - sim.currentTime;
-    
-    if (frameTime > dt) {
-      frameTime = dt;
-      currentTime = newTime;
-    }
-    
-    accumulator += frameTime;
-    
-    while (accumulator >= dt) {
-      previousState = currentState;
-      updateWorld(currentState, t, dt);
-      t += dt;
-      accumulator -= dt;
-    }
-    
-    var alpha = accumulator / dt;
-    
-    state = currentState * alpha + previousState * (1.0 - alpha);
-    
-    renderWorld(state);
-
-    requestAnimationFrame(main);
-  }*/
-  
   //if (sim.state === 2) { drawMenus(2); return; } //draw menus if the game is paused
 }
 
 //load all event listeners and our engine when the page is loaded
 document.body.onload = function() {
-  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detect pressed keys
-  window.addEventListener('contextmenu', function(event){mouseEvents(event)}, false); //disable right-click menu in canvas
-  window.addEventListener('mousedown', function(event){mouseEvents(event)}, false); //detect pressed mouse buttons
-  window.addEventListener('mousemove', function(event){mouseEvents(event)}, false); //detect mouse movement
-  window.addEventListener('mouseup', function(event){mouseEvents(event)}, false); //detect realeased mouse buttons
+  //disable right-click in canvas and detect mouse movement and pressed/released mouse buttons
+  var mEvents = ['contextmenu', 'mousedown', 'mouseup', 'mousemove'];
+  for (var i = 0; i < mEvents.length; i++) {
+    window.addEventListener(mEvents[i], function(event){mouseEvents(event)}, false); //disable right-click menu in canvas
+  }
+  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detect pressed keyboard keys
   drawMenus(1);
   main(); //and finally let's load our engine
 };
