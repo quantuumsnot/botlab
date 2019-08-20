@@ -1,8 +1,40 @@
 // description: testing lab for bots and their AI
 // author: me
 // source code: https://github.com/quantuumsnot/botlab
+/* comments legend */
+//PERFOPT: code optimisation for performance
+//TODO: task for future completion
+//FIXED: part of the code where there was a bug and was fixed
+//IMPORTANT: code which must be not deleted or must be carefully examined when a new bug arises
+//BUG: marks where in the engine we have an actual bug
 
 'use strict'; //meh
+
+//load bot list - 5 variants
+/*var filesInput = document.createElement("script");
+filesInput.setAttribute("src", "./bots.json");
+filesInput.setAttribute("type", "module");
+filesInput.setAttribute("async", "true");
+document.body.appendChild(filesInput);*/
+/*---*/
+/*var fileReader = new FileReader();
+var botson = JSON.parse(fileReader.readAsDataURL(filesInput.value));*/
+/*---*/
+/*import * as botList from 'bots.json';
+console.log(botList);*/
+/*---*/
+/*fetch('./bots.json').then(response => {
+  return response.json();
+}).then(data => {
+  // Work with JSON data here
+  console.log(data);
+}).catch(err => {
+  // Do something for an error here
+});*/
+//console.log(botList);
+
+//check browser for using specific supported features
+var isChromium = !!window.chrome;
 
 /* ------------------- Units of measurement reference table ----------------- */
 /* Units - Forces - Moment - Acceleration - Velocity - Position - Mass - Inertia */
@@ -36,7 +68,7 @@ blockedKeys = [19, 32, 37, 38, 39, 40], //arrows, space, pause
 specialKeysState = {SHIFT: false, CTRL: false, ALT: false}; //shift, ctrl, alt
 
 var mainRatio = 12;
-var screenMenus = ["CREATE FAST BOT", "CREATE SLOW BOT", "CREATE GENERIC BOT"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
+var screenMenus = ["CREATE FAST BOT", "CREATE SLOW BOT", "CREATE GENERIC BOT", "CREATE RANDOM BOTS"];//, "RESTART", "SAVE", "LOAD", "OPTIONS", "EXIT", "GAMEPLAY", "GRAPHICS", "AUDIO"]; //main menu
 var baseText = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-*/=%";
 var baseTextLength = baseText.length;
 var sortedMenus = screenMenus;
@@ -64,7 +96,7 @@ var acos = Math.acos; //in radians
 var atan2 = Math.atan2; //in radians
 var atan = Math.atan; //in radians
 var PI = 3.141592; //Math.PI, hardcoded must be faster cause we're not calling each time Math.PI object
-var TAU = 2 * PI; //PERFOPT: 6.283184 or (3.141592/180)*360 or 2*Pi from degrees to radians, because arc() uses radians
+var TAU = 2 * PI; //PERFOPT: 6.283184 radians, because arc() uses radians
 var sqrt = Math.sqrt;
 var pow = Math.pow;
 var exp = Math.exp;
@@ -80,42 +112,44 @@ var guidanceError = 5 * Deg2Rad; //5 in degrees, converted to Radians
 /* -------------------------------------------------------------------------- */
 
 function detectKeys(event) {
+  event.preventDefault(); event.stopPropagation();
   var key = event.keyCode || event.which; //alternative to ternary - if there is no keyCode, use which
-  if (blockedKeys.indexOf(key) !== undefined) { //prevents scrolling of browser's viewport with the keys, f5 not working (fixed at the end of the function)
-    event.preventDefault(); event.stopPropagation();
-    if (sim.state === 1) { //Ctrl + A
+  //prevents scrolling of browser's viewport with the keys, f5 not working (fixed at the end of the function)
+  /*if (blockedKeys.indexOf(key) !== undefined) {
+    if (sim.state === 1) { //Ctrl + A, selecting all bots ???
       if (key == 65 && event.ctrlKey) {
         //;
       }
     }
-    switch (key) { //19 - pause, 32 - space, 37 - left, 38 - up, 39 - right, 40 - down
-      case 19:
-        switch (sim.state) {
-          case 0: break;
-          case 1: sim.state = 2; break;
-          case 2: sim.state = 1; main(); break;
-        }
-        break;
-      case 32: //currently we are using space for easier restart of our simulation
-        switch (sim.state) {
-          case 0: 
-            sim.botIdCounter = 0; 
-            sim.bots = [];
-            sim.runningBots = 0;
-            sim.startTime = 0;
-            spawnBots();
-            sim.state = 1;
-            main();
-            break;
-          case 1:
-            restartSim();
-            break;
-          case 2: 
-            restartSim();
-            break;
-        }
-        break;
-    }
+  }*/
+  
+  switch (key) { //19 - pause, 32 - space, 37 - left, 38 - up, 39 - right, 40 - down
+    case 19:
+      switch (sim.state) {
+        case 0: break;
+        case 1: sim.state = 2; break;
+        case 2: sim.state = 1; main(); break;
+      }
+      break;
+    case 32: //currently we are using space for easier restart of our simulation
+      switch (sim.state) {
+        case 0: 
+          sim.botIdCounter = 0; 
+          sim.bots = [];
+          sim.runningBots = 0;
+          sim.startTime = 0;
+          spawnBot("random", 3);
+          sim.state = 1;
+          main();
+          break;
+        case 1:
+          restartSim();
+          break;
+        case 2: 
+          restartSim();
+          break;
+      }
+      break;
   }
   if (key === definedKeys.F5) { document.location.reload(true); } //fixes 'f5 not working' issue
 }
@@ -150,7 +184,6 @@ var sim = {
   mouseX: 0, mouseY: 0, mouseTarget: "", 
   mKey: 0, 
   state: 1, /*0 - stopped, 1 - running, 2 - paused*/
-  destinationReached: false,
   startTime: 0, playedTime: 0, tempPlayedTime: 0, currentTime: 0, lastTime: 0, dTime: 0, timeProduct: 0, updateTime: 0, worldUpdates: 0, 
   distPerFrame: 0, 
   timeScale: 1, /*< 1 speeds up, > 1 slows down the game, must be fixed*/ 
@@ -158,10 +191,8 @@ var sim = {
   timeDiff: 0, temp: 0, 
   dx: 0, dy: 0, 
   referenceGravity: 9.80665, //reference gravity in m/sq. s at sea level
-  currentGravity: this.referenceGravity, //in m/sq. s
   earthRadius: 6371000, //in m
   earthPowRadius: 40589641000000, //in m
-  geopotentialHeight: 0, //in m
   frictionVector: 0.99, //maybe for ground vehicles
   bounceFactor: 0.05, //maybe for particles or projectiles
   distance: 0, x: 0, y: 0, 
@@ -175,12 +206,6 @@ var sim = {
   gasConstant: 8.3144598, //reference gas constant at sea level, in J/mol Kelvin, or 1545.35 ft lb/lbmol Rankine
   airMolarMass: 0.0289644, // in kg/mol
   airLapseRate: 0.0065, //0.0098 reference air lapse rate in Celsius per meter altitude, 0.0065 reference air lapse rate in Kelvin per meter, 0.0019812 in Kelvin per foot
-  airViscosity: this.airReferenceViscosity, 
-  airPressure: this.airReferencePressure, 
-  airDensity: this.airReferenceDensity, 
-  kinematicViscosity: 0, 
-  ReynoldsNumber: 0, 
-  airCurrentTemp: this.airReferenceTemperature, 
   counter: 0, 
   showFPSMem: true, currentFPS: 0, currentMS: 0, currentMem: 0, showTraj: false, showUnitStats: true, 
   botIdCounter: 0, bots: [], runningBots: 0, 
@@ -206,7 +231,7 @@ var targetCount = targets.length;
 
 //calculate length of the racetrack, later we'll use that for calculating the efficiency of our bots ...
 // ... ie bot's travelled distance divided by racetrack's length will give us diff in percent (positive number means less efficient)
-for (var a = 0; a < targetCount; a++) {
+for (var a = 0; a < targetCount - 1; a++) {
   if (a === 8) continue;
   var tmpdiffX = Math.abs(targets[a].x - targets[a+1].x);
   var tmpdiffY = Math.abs(targets[a].y - targets[a+1].y);
@@ -220,22 +245,31 @@ for (var a = 0; a < targetCount; a++) {
 mapTexture.src = "maptexture_test1.png";*/
 
 //Bot object
-var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
+var Bot = function ({botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj}, type) {
   this.position = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.destination = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.direction = {x: 0, y: 0, z: 0}; //z is the ALTITUDE!!!
   this.distance = 0; //in m
   this.distanceTravelled = 0; //in m
   this.distanceFromEarthCenter = sim.earthRadius; //in m
+  this.currentGravity = sim.referenceGravity; //in m/sq. s
+  this.airViscosity = sim.airReferenceViscosity; 
+  this.airPressure = sim.airReferencePressure; 
+  this.airDensity = sim.airReferenceDensity; 
+  this.airCurrentTemp = sim.airReferenceTemperature;
+  this.KelvinToRankine =  this.airCurrentTemp * 1.8; //in Rankine
+  this.ReynoldsNumber = 0; 
+  this.geopotentialHeight = 0; //in m
   this.altitude = this.position.z; //in m
-  this.pitch = 0; //angle of attack ? in degrees?
-  this.roll = 0; //in degrees?
-  this.yaw = 0; //in degrees?
-  this.heading = 0; //in degrees, 0 - East
-  this.rollRate = 400 * sim.timeStep; //400 degrees roll rate in second or 0.4 deg per 1 milisecond
-  this.yawRate = 400 * sim.timeStep; //temporarily same as rollRate
-  this.pitchRate = 400 * sim.timeStep; //temporarily same as rollRate
-  this.dragCoeff = dragpoints * 0.0001;
+  this.pitch = 0; //angle of attack ? in Radians?
+  this.roll = 0; //in Radians?
+  this.yaw = 0; //in Radians?
+  this.heading = 0; //in Radians, 0 - East?
+  this.rollRate = 400 * Deg2Rad * sim.timeStep; //400 degrees roll rate in second or 0.4 deg per 1 milisecond, converted to Radians
+  this.yawRate = 400 * Deg2Rad * sim.timeStep; //temporarily same as rollRate, converted to Radians
+  this.pitchRate = 400 * Deg2Rad * sim.timeStep; //temporarily same as rollRate, converted to Radians
+  this.dragCoeff = dragpoints * 0.0001; //TODO: find why I multiply by 0.0001 //FOUND: if 0.0001 is removed the bot crashes very fast
+  this.dragForce = Number.EPSILON;
   this.thrust = thrust; //in kgf
   this.fuel = fuel; //in liters
   this.mass = mass; //in kg
@@ -246,6 +280,8 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.oldAcceleration = 0;
   this.velocity = {x: 0, y: 0, z: 0}; //maybe needed for proper integration
   this.speed = 0; //current speed in m/s
+  this.momentOfInertia = 0.4 * this.loadedMass * wingspan * wingspan; //solid sphere inertia formula is from https://en.wikipedia.org/wiki/List_of_moments_of_inertia
+  //check also https://www.toptal.com/game/video-game-physics-part-i-an-introduction-to-rigid-body-dynamics
   this.wingSpan = wingspan; //in m
   this.wingArea = wingarea; //in sq.m
   this.wingLoading = (this.loadedMass / this.wingArea) * sim.timeStep; //in kg/sq.m
@@ -254,7 +290,7 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   this.liftCoeff = 0;
   this.liftForce = 0; //in kN
   this.fuelConsumption = (this.thrust / 100) * 0.035; //0.035 litres per second, thrust * fuel consumption per second, for jet engine ~150kN ~35g fuel per second per 1kN or 100kg thrust
-  this.fuelConPerTimeStep = this.fuelConsumption * sim.timeStep; //small optimization
+  this.fuelConPerTimeStep = this.fuelConsumption * sim.timeStep; //PERFOPT: small optimization
   this.trajectoryLine = traj;
   this.CoM = 0; //center of mass
   this.CoT = 0; //center of thrust
@@ -275,6 +311,12 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   sim.botIdCounter++;
   sim.runningBots++;
   /* ------------------------------------------------------------------------ */
+  //check if the request was for a random bot instead of a predefined one
+  if (type === "random") {
+    this.color = '#'+random().toString(16).slice(-6); //color based on http://stackoverflow.com/a/5365036/1196983
+    this.fuel = (random()*100)+1; //fuel
+  }
+  /*--------------------------------------------------------------------------*/
   
   //set starting position to be equal for each bot
   this.startPosDiffX = abs(targets[1].x - targets[0].x);
@@ -288,15 +330,17 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     this.startPosDiffY /= this.startPosDistance;
     this.startPosDiffZ /= this.startPosDistance;
   }
-  this.startPosAngle = atan2(this.startPosDiffY, this.startPosDiffX);// * Rad2Deg; //converted to Degrees, Y must be the first parameter!!!
+  this.startPosAngle = atan2(-this.startPosDiffY, this.startPosDiffX); //startPosDiffY must be first!!!
   this.heading = this.startPosAngle;
+  if (this.startPosAngle > 0) { this.heading /= this.startPosAngle; } //dunno if we must normalize the heading angle
+  //IMPORTANT: Rly can't remember why I'm dividing startPosAngle by 180*PI
   this.position.x = targets[0].x + (sim.targetSize) * cos(this.startPosAngle / (180 * PI));
   this.position.y = targets[0].y + (sim.targetSize) * sin(this.startPosAngle / (180 * PI));
   this.position.z = targets[0].z + (sim.targetSize) * sin(this.startPosAngle / (180 * PI));
   
   //find distance between bot and first target so we can substract it from bot's overall distance travelled
   this.distanceBeforeFirstTarget = hypot(abs(this.position.x - targets[0].x), abs(this.position.y - targets[0].y), abs(this.position.z - targets[0].z));
-  //some var cleaning, idk if this is usefull
+  //PERFOPT: some var cleaning, idk if this is usefull
   delete this.startPosDiffX; delete this.startPosDiffY; delete this.startPosDiffZ; delete this.startPosDistance; delete this.startPosAngle;
   /* ------------------------------------------------------------------------ */
   
@@ -330,16 +374,16 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
   //calculate wing loading and lift force
   this.updateWingLoadAndLiftForce = function() {
     this.wingLoading = (this.loadedMass / this.wingArea) * sim.timeStep;
-    this.liftCoeff = ((this.loadedMass * sim.currentGravity) / ((sim.airDensity / 2) * pow(this.acceleration, 2) * this.wingArea)) * sim.timeStep;
-    this.liftCoeff = isNaN(this.liftCoeff) ? 0 : this.liftCoeff;
-    this.liftForce = (this.liftCoeff * (0.5*(sim.airDensity * pow(this.acceleration, 2))) * this.wingArea) * sim.timeStep;
-    this.liftForce = isNaN(this.liftForce) ? 0 : this.liftForce;
+    this.liftCoeff = ((this.loadedMass * this.currentGravity) / ((this.airDensity / 2) * pow(this.acceleration, 2) * this.wingArea)) * sim.timeStep;
+    this.liftCoeff = isNaN(this.liftCoeff) ? 0 : this.liftCoeff; //BUG: Always ZERO
+    this.liftForce = (this.liftCoeff * (0.5*(this.airDensity * pow(this.acceleration, 2))) * this.wingArea) * sim.timeStep;
+    this.liftForce = isNaN(this.liftForce) ? 0 : this.liftForce; //BUG: Always ZERO
   };
 
   //update targets
   this.updateTargets = function() {
     //set destination coords for our bot only once for each destination
-    if (this.hasTarget === false && this.state === true) {
+    if (this.hasTarget === false && this.state === true && this.target < targetCount - 1) {
       this.hasTarget = true;
       this.destination.x = targets[this.target].x;
       this.destination.y = targets[this.target].y;
@@ -348,26 +392,28 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     }
     
     //update bot state if there aren't new targets
-    if (this.target > targetCount) {
+    if (this.target > targetCount - 1) {
       this.isTimed = false; //stop the stopwatch for our bot
       this.state = false; //set state of our bot to inactive
       sim.runningBots--; //remove our bot from the list with active bots
-      return; //maybe it's better to early exit from the function, execution of the conditions below is useless
+      return; //maybe it's better to early exit from the function, since checking of the conditions following it is a performance hit
     }
   };
   
   this.checkTargets = function() {
     //IMPORTANT: after adding air pressure, density and temp it seems that bot stuck again at the checkpoints
-    if (this.target < targetCount - 1) { //check if our bot has more targets
-      this.hasTarget = false;
-      this.target++; //bot went through another target
-      //this.distanceTravelled += this.size; //temporarily disabled
+    if (this.target <= targetCount - 1) { //check if our bot has more targets
+      if (this.distance <= this.size) {
+        this.hasTarget = false;
+        this.target++; //bot went through another target
+        //this.distanceTravelled += this.size; //temporarily disabled
+      }
     } else { //or if hasn't ...
       this.isTimed = false; //stop the stopwatch for our bot
       this.state = false; //set state of our bot to inactive
-      this.hasTarget = false; //remove our bot's target state
+      this.hasTarget = false; //set our bot has no target
       this.distanceTravelled -= this.distanceBeforeFirstTarget;
-      sim.runningBots--; //remove our bot from the list with active bots
+      sim.runningBots--; //remove our bot from the active bots' list
       console.log("Bot " + this.id + " finished in " + parseFloat(this.time*0.001).toFixed(3) + " seconds | " + parseFloat(this.distanceTravelled).toFixed(3) + " meters travelled");
     }
   };
@@ -382,13 +428,9 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     //IMPORTANT: DO NOT REMOVE ~~ FROM HERE or bots stuck in checkpoints
     //it seems that if ~~ is removed bots no more stuck, this happened after adding the 3rd axis
     this.distance = hypot(this.direction.x, this.direction.y, this.direction.z); //perf tests show that using ~~ in front of Math.hypot() the code is 8% faster
-    
+
     //check if the bot is still away from the target, possible jittering near the target
-    if (this.distance <= this.size) {
-      this.checkTargets();
-    } else { 
-      ; //TODO: this line should not look like this, but it's the best I can do to continue the execution
-    }
+    this.checkTargets();
     
     //this normalizes the vector, so our calculations for direction and speed in Cartesian system are not skewed
     this.direction.x /= this.distance;
@@ -403,88 +445,102 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
     //FIRST calculate Geopotential height
     //this is gravity-adjusted altitude of our bot, using variation of the gravity with latitude and elevation
     //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-    sim.geopotentialHeight = (sim.earthRadius * this.altitude / (sim.earthRadius + this.altitude)) / 1000; //in kilometers
+    this.geopotentialHeight = (sim.earthRadius * this.altitude / (sim.earthRadius + this.altitude)) / 1000; //in kilometers
     
+    //calculate current air temperature, in Kelvin, and air density + pressure, in Pascals
+    //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
     //1st variant
-    //calculate current air temperature, in Kelvin
-    //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-    if (sim.geopotentialHeight <= 11) { sim.airCurrentTemp = 288.15 - (6.5 * sim.geopotentialHeight); } // Troposphere
-    else if (sim.geopotentialHeight <= 20) { sim.airCurrentTemp = 216.65 - (6.5 * sim.geopotentialHeight); } // Stratosphere starts
-    else if (sim.geopotentialHeight <= 32) { sim.airCurrentTemp = 196.65 + sim.geopotentialHeight; }
-    else if (sim.geopotentialHeight <= 47) { sim.airCurrentTemp = 228.65 + 2.8 * (sim.geopotentialHeight - 32); }
-    else if (sim.geopotentialHeight <= 51) { sim.airCurrentTemp = 270.65 - (6.5 * sim.geopotentialHeight); }// Mesosphere starts
-    else if (sim.geopotentialHeight <= 71) { sim.airCurrentTemp = 270.65 - 2.8 * (sim.geopotentialHeight - 51); }
-    else if (sim.geopotentialHeight <= 84.85) { sim.airCurrentTemp = 214.65 - 2 * (sim.geopotentialHeight - 71); }
-    //geopotHeight must be less than 84.85 km
+    //this.airCurrentTemp = sim.airReferenceTemperature - (sim.airLapseRate*this.altitude) + 273.15; //in Kelvin
     //2nd variant
-    //sim.airCurrentTemp = sim.airReferenceTemperature - (sim.airLapseRate*this.altitude) + 273.15; //in Kelvin
-    /*---------------------*/
-    var KelvinToRankine = sim.airCurrentTemp * 1.8; //in Rankine
-    
-    //calculate current air density and pressure, in Pascals
-    //based on https://en.wikipedia.org/wiki/Barometric_formula#Source_code
-    if (sim.geopotentialHeight <= 11) { sim.airPressure = 101325 * pow(288.15 / sim.airCurrentTemp, -5.255877); }
-    else if (sim.geopotentialHeight <= 20) { sim.airPressure = 22632.06 * exp(-0.1577 * (sim.geopotentialHeight - 11)); }
-    else if (sim.geopotentialHeight <= 32) { sim.airPressure = 5474.889 * pow(216.65 / sim.airCurrentTemp, 34.16319); }
-    else if (sim.geopotentialHeight <= 47) { sim.airPressure = 868.0187 * pow(228.65 / sim.airCurrentTemp, 12.2011); }
-    else if (sim.geopotentialHeight <= 51) { sim.airPressure = 110.9063 * exp(-0.1262 * (sim.geopotentialHeight - 47)); }
-    else if (sim.geopotentialHeight <= 71) { sim.airPressure = 66.93887 * pow(270.65 / sim.airCurrentTemp, -12.2011); }
-    else if (sim.geopotentialHeight <= 84.85) { sim.airPressure = 3.956420 * pow(214.65 / sim.airCurrentTemp, -17.0816); }
+    if (this.geopotentialHeight <= 11) { 
+      this.airCurrentTemp = 288.15 - (6.5 * this.geopotentialHeight);
+      this.airPressure = 101325 * pow(288.15 / this.airCurrentTemp, -5.255877);
+    } // Troposphere
+    else if (this.geopotentialHeight <= 20) { 
+      this.airCurrentTemp = 216.65 - (6.5 * this.geopotentialHeight);
+      this.airPressure = 22632.06 * exp(-0.1577 * (this.geopotentialHeight - 11));
+    } // Stratosphere starts
+    else if (this.geopotentialHeight <= 32) { 
+      this.airCurrentTemp = 196.65 + this.geopotentialHeight;
+      this.airPressure = 5474.889 * pow(216.65 / this.airCurrentTemp, 34.16319);
+    }
+    else if (this.geopotentialHeight <= 47) { 
+      this.airCurrentTemp = 228.65 + 2.8 * (this.geopotentialHeight - 32);
+      this.airPressure = 868.0187 * pow(228.65 / this.airCurrentTemp, 12.2011);
+    }
+    else if (this.geopotentialHeight <= 51) { 
+      this.airCurrentTemp = 270.65 - (6.5 * this.geopotentialHeight);
+      this.airPressure = 110.9063 * exp(-0.1262 * (this.geopotentialHeight - 47));
+    }// Mesosphere starts
+    else if (this.geopotentialHeight <= 71) { 
+      this.airCurrentTemp = 270.65 - 2.8 * (this.geopotentialHeight - 51);
+      this.airPressure = 66.93887 * pow(270.65 / this.airCurrentTemp, -12.2011);
+    }
+    else if (this.geopotentialHeight <= 84.85) { 
+      this.airCurrentTemp = 214.65 - 2 * (this.geopotentialHeight - 71);
+      this.airPressure = 3.956420 * pow(214.65 / this.airCurrentTemp, -17.0816);
+    }
+    //geopotHeight must be less than 84.85 km
     //altitude must be less than 86 km if we want the formula below to work
-    sim.airDensity = (sim.airPressure * sim.airMolarMass) / (sim.gasConstant * sim.airCurrentTemp);
+    this.airDensity = (this.airPressure * sim.airMolarMass) / (sim.gasConstant * this.airCurrentTemp);
     
     //calculate current air pressure at bot's position
-    sim.airPressureX = 0.5 * sim.airDensity * pow(this.velocity.x, 2);
-    sim.airPressureY = 0.5 * sim.airDensity * pow(this.velocity.y, 2);
-    sim.airPressureZ = 0.5 * sim.airDensity * pow(this.velocity.z, 2);
+    this.airPressureX = 0.5 * this.airDensity * pow(this.velocity.x, 2);
+    this.airPressureY = 0.5 * this.airDensity * pow(this.velocity.y, 2);
+    this.airPressureZ = 0.5 * this.airDensity * pow(this.velocity.z, 2);
     
     //calculate current air viscosity
-    sim.airViscosity = sim.airReferenceViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*KelvinToRankine) + sim.SutherlandConstant))*pow(KelvinToRankine/sim.RankineRefTemp, 3.2); //in centipose
+    this.KelvinToRankine = this.airCurrentTemp * 1.8; //in Rankine
+    this.airViscosity = sim.airReferenceViscosity*(((0.555*sim.RankineRefTemp) + sim.SutherlandConstant)/((0.555*this.KelvinToRankine) + sim.SutherlandConstant))*pow(this.KelvinToRankine/sim.RankineRefTemp, 3.2); //in centipose
 
     //IMPORTANT - adding and drag to equation makes bots to jump from reached destination
     //IMPORTANT - dunno why but changed calculation of position.xyz seems fixed the jumping, and travelled distance is somewhat CORRECT!!!
     
     //calculate the Reynolds number for using the correct drag law later
-    sim.kinematicViscosity = sim.airViscosity / sim.airDensity;
-    sim.ReynoldsNumber = (this.acceleration * this.size) / sim.kinematicViscosity;
-    
+    this.kinematicViscosity = this.airViscosity / this.airDensity;
+    this.ReynoldsNumber = (this.acceleration * this.size) / this.kinematicViscosity;
+
     //choose which drag law to use
-    if (sim.ReynoldsNumber < 1) {
+    if (this.ReynoldsNumber < 1) {
       //for low velocity, linear drag or laminar flow
-      var dragX = 6 * PI * sim.airViscosity * this.size * this.velocity.x;
-      var dragY = 6 * PI * sim.airViscosity * this.size * this.velocity.y;
-      var dragZ = 6 * PI * sim.airViscosity * this.size * this.velocity.z;
+      var dragX = 6 * PI * this.airViscosity * this.size * this.velocity.x;
+      var dragY = 6 * PI * this.airViscosity * this.size * this.velocity.y;
+      var dragZ = 6 * PI * this.airViscosity * this.size * this.velocity.z;
     } else {
       //for high velocity, quadratic drag or turbulent flow
-      var dragX = sim.airPressureX * this.dragCoeff * this.frontalArea;
-      var dragY = sim.airPressureY * this.dragCoeff * this.frontalArea;
-      var dragZ = sim.airPressureZ * this.dragCoeff * this.frontalArea;
+      var dragX = this.airPressureX * this.dragCoeff * this.frontalArea;
+      var dragY = this.airPressureY * this.dragCoeff * this.frontalArea;
+      var dragZ = this.airPressureZ * this.dragCoeff * this.frontalArea;
     }
-    dragX = (isNaN(dragX) ? 0 : dragX*sim.timeStep);
-    dragY = (isNaN(dragY) ? 0 : dragY*sim.timeStep);
-    dragZ = (isNaN(dragZ) ? 0 : dragZ*sim.timeStep);
+    dragX = (isNaN(dragX) ? 0 : dragX*sim.timeStep); //BUG: Always ZERO
+    dragY = (isNaN(dragY) ? 0 : dragY*sim.timeStep); //BUG: Always ZERO
+    dragZ = (isNaN(dragZ) ? 0 : dragZ*sim.timeStep); //BUG: Always ZERO
+    
+    //TODO: calculate this.dragForce
     
     //calculate actual Earth's gravity
     this.distanceFromEarthCenter = sim.earthRadius + this.position.z;
-    sim.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(this.distanceFromEarthCenter, 2));
-    sim.currentGravity = parseFloat(sim.currentGravity).toFixed(6);
+    this.currentGravity = sim.referenceGravity * (sim.earthPowRadius / pow(this.distanceFromEarthCenter, 2));
+    this.currentGravity = parseFloat(this.currentGravity).toFixed(6);
 
     //move our bot, maybe a Verlet version?
     //1st variant
-    //var stepX = (this.velocity.x - dragX + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragX)
-    //var stepY = (this.velocity.y - dragY + (0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragY)
-    //var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*sim.currentGravity*sim.timeStep)+(0.5*this.acceleration*sim.timeStep))*sim.timeStep; //minus aerodynamic drag (dragZ) + liftForce - gravity (sim.gravity) 
+    //var stepX = (this.velocity.x - dragX + (0.5*this.acceleration*sim.timeStep))*sim.timeStep;
+    //var stepY = (this.velocity.y - dragY + (0.5*this.acceleration*sim.timeStep))*sim.timeStep;
+    //var stepZ = ((this.velocity.z - dragZ + this.liftForce*sim.timeStep) - (0.5*this.currentGravity*sim.timeStep)+(0.5*this.acceleration*sim.timeStep))*sim.timeStep;
     //2nd variant
     this.acceleration *= 0.5*sim.timeStep;
-    sim.currentGravity *= 0.5*sim.timeStep*sim.timeStep;
+    this.currentGravity *= 0.5*sim.timeStep*sim.timeStep;
     this.velocity.x += this.direction.x * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
     this.velocity.y += this.direction.y * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
     this.velocity.z += this.direction.z * ((this.acceleration - this.oldAcceleration)/2) * sim.timeStep;
     var stepX = (this.velocity.x - dragX + this.acceleration);
     var stepY = (this.velocity.y - dragY + this.acceleration);
-    if (this.liftForce === 0) {
-      var stepZ = -(this.velocity.z - dragZ - sim.currentGravity);
-    } else var stepZ = (this.velocity.z - dragZ - sim.currentGravity + this.liftForce);// + this.acceleration);
+    if (this.liftForce <= 0) {
+      var stepZ = -(this.velocity.z - dragZ - this.currentGravity + this.liftForce + this.acceleration);
+    } else {
+      var stepZ = (this.velocity.z - dragZ - this.currentGravity + this.liftForce + this.acceleration);
+    }
     this.position.x += stepX;
     this.position.y += stepY;
     this.position.z += stepZ;
@@ -521,45 +577,45 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
       console.log("Speed "          + this.speed +
                   " Altitude "       + this.altitude +
                   " AirTemp "        + tempTemp +
-                  " AirDensity "     + sim.airDensity +
-                  " AirPressureX "    + sim.airPressureX +
-                  " AirPressureY "    + sim.airPressureY +
-                  " AirPressureZ "    + sim.airPressureZ +
-                  " AirViscosity "   + sim.airViscosity +
-                  " CGravity "       + sim.currentGravity
+                  " AirDensity "     + this.airDensity +
+                  " AirPressureX "    + this.airPressureX +
+                  " AirPressureY "    + this.airPressureY +
+                  " AirPressureZ "    + this.airPressureZ +
+                  " AirViscosity "   + this.airViscosity +
+                  " CurrentGravity "       + this.currentGravity
                  );
     }*/
   };
   
   this.updateGuidanceSystem = function() {
-    //find angle to the target in radians and convert it to degrees
-    //var targetAngleXY = atan2(directionY, directionX) * (180 / PI); //y BEFORE x!!!
-    //var targetAngleZ = atan(directionX/directionY) * (180 / PI);
-    //var targetAngleXY = acos(directionZ / this.distance) * (180 / PI);
-    //var targetAngleZ = atan2(directionY, directionX) * (180 / PI);
-    this.targetAngleXY = atan2(this.direction.y, this.direction.x) * Rad2Deg;
-    this.targetAngleZ = acos(this.direction.z / hypot(this.position.x, this.position.y, this.position.z)) * Rad2Deg;
-    
-    //check heading and if needed change it using turning speed, turning speed 0.1667 is one minute or 1/60 degree
-    //uses Proportional Navigation algorithm, diff is set to global var guidanceError degrees, our multiplier is PowerToWeightRatio
-    //bigger PowerToWeightRatio, bigger course corrections
-    //faster bots have higher speed and hense energy so they need bigger course corrections (so their multiplier is bigger)
-    if (this.heading - this.targetAngleXY >= guidanceError) {
-      this.heading -= this.yawRate * this.PowerToWeightRatio * Deg2Rad; //convert values from Degrees to Radians before subtracting them from heading
-    } else {
-      this.heading += this.yawRate * this.PowerToWeightRatio * Deg2Rad; //convert values from Degrees to Radians before adding them to heading
-    }
-    
-    //IMPORTANT: don't forget to convert guidanceError back to degrees because pitch is in degrees
-    if (this.pitch - this.targetAngleZ >= guidanceError * Rad2Deg) {
-      this.pitch -= this.pitchRate * this.PowerToWeightRatio;
-    } else {
-      this.pitch += this.pitchRate * this.PowerToWeightRatio;
-    }
-      
-    //check if bot's altitude is higher than 0, ie to be always bigger than its size, this is a crash prevention
+    //IMPORTANT: This is a crash prevention. Check if bot's altitude is higher than its size
     if (this.altitude <= this.size) {
       this.pitch += this.pitchRate * this.PowerToWeightRatio;
+    }
+    
+    if (this.hasTarget == true) {
+      //find angle to the target in radians and convert it to degrees
+      //var targetAngleXY = atan2(-directionY, directionX) * (180 / PI); //y BEFORE x!!!
+      //var targetAngleZ = atan(directionX/directionY) * (180 / PI);
+      //var targetAngleXY = acos(directionZ / this.distance) * (180 / PI);
+      //var targetAngleZ = atan2(-directionY, directionX) * (180 / PI);
+      this.targetAngleXY = atan2(-this.direction.y, this.direction.x);
+      this.targetAngleZ = acos(this.direction.z / hypot(this.position.x, this.position.y, this.position.z));
+      
+      //uses Proportional Navigation algorithm, diff is set to global var guidanceError, our multiplier is PowerToWeightRatio
+      //bigger PowerToWeightRatio, bigger course corrections
+      //faster bots have higher speed and hense energy so they need bigger course corrections (so their multiplier is bigger)
+      if (this.heading - this.targetAngleXY >= guidanceError) {
+        this.heading -= this.yawRate * this.PowerToWeightRatio;
+      } else {
+        this.heading += this.yawRate * this.PowerToWeightRatio;
+      }
+      
+      if (this.pitch - this.targetAngleZ >= guidanceError) {
+        this.pitch -= this.pitchRate * this.PowerToWeightRatio;
+      } else {
+        this.pitch += this.pitchRate * this.PowerToWeightRatio;
+      }
     }
   };
   
@@ -577,39 +633,28 @@ var Bot = function (botColor, dragpoints, thrust, mass, height, wingspan, wingar
 
 //spawn a bot based on different criteria
 //(botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj)
-function spawnBot(type, botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
-  if (type !== "generic") {
-    switch (type) {
-      case "fast": 
-        sim.bots.push(new Bot("red", 100, 20000, 500, 5, 15, 70, 1, 1000, false));
-        break;
-      case "slow": 
-        sim.bots.push(new Bot("green", 100, 10000, 500, 5, 15, 70, 1, 1000, false));
-        break;
-    }
-  }
-  else {
-    sim.bots.push(new Bot("white", 100, 15000, 500, 5, 15, 70, 1, 100, true));
-    type = "generic";
+/*function spawnBot(type, botColor, dragpoints, thrust, mass, height, wingspan, wingarea, wingtype, fuel, traj) {
+  switch (type) {
+    case "generic":
+      sim.bots.push(new Bot("white", 100, 15000, 500, 5, 15, 70, 1, 100, true));
+      break;
+    case "fast": 
+      sim.bots.push(new Bot("red", 100, 20000, 500, 5, 15, 70, 1, 1000, false));
+      break;
+    case "slow": 
+      sim.bots.push(new Bot("green", 100, 10000, 500, 5, 15, 70, 1, 1000, false));
+      break;
   }
   console.log("A " + type + " bot was created");  
-}
-
-//create N random bots for testing
-/*function spawnRandomBots(numOfBots) {
-  for (var i = 0; i < numOfBots; i++) {
-    sim.bots.push(new Bot('#'+random().toString(16).slice(-6), //color based on http://stackoverflow.com/a/5365036/1196983
-                                                                        100, //dragpoints
-                                                                        15000, //thrust
-                                                                        5000, //mass
-                                                                        5, //height
-                                                                        15, //wingspan
-                                                                        70, //wingarea
-                                                                        1, //wingtype
-                                                    (random()*100)+1, //fuel
-                                                                        false)); //enable or disable trajectory drawing
-  }
 }*/
+
+function spawnBot(type, numOfBots) {
+  if (type === "random") {
+    for (var i = 0; i < numOfBots; i++) {
+      sim.bots.push(new Bot(botList[type], type));
+    }
+  } else sim.bots.push(new Bot(botList[type]));
+}
 
 //restart our simulation
 function restartSim() {
@@ -618,7 +663,7 @@ function restartSim() {
   sim.bots = [];
   sim.runningBots = 0;
   sim.startTime = 0;
-  spawnBots();
+  spawnBot("random", 3); //restart with 3 random bots
   sim.state = 1;
 }
 
@@ -642,8 +687,8 @@ function restartSim() {
 
 //detect mouse clicks
 function mouseEvents(event) {
+  event.preventDefault(); event.stopPropagation();
   if (event.target === racetrackWindow.Canvas) {
-    event.preventDefault(); event.stopPropagation();
     /*sim.mouseX = Math.abs(event.clientX - racetrackWindow.Rect.left - racetrackWindow.BorderWidth);
     sim.mouseY = Math.abs(event.clientY - racetrackWindow.Rect.top - racetrackWindow.BorderWidth);
     sim.mouseTarget = racetrackWindow.Canvas;*/
@@ -654,28 +699,21 @@ function mouseEvents(event) {
     sim.mouseTarget = simOptionsWindow.Canvas;
   }
   else if (event.target === telemetryWindow.Canvas) {
-    event.preventDefault(); event.stopPropagation();
     //sim.mouseX = Math.abs(event.clientX - telemetryWindow.Rect.left - telemetryWindow.BorderWidth) * gameInterface.ratio; //idk if Rect.left should be Rect.right, cause minimap has CSS pos right
     //sim.mouseY = Math.abs(event.clientY - telemetryWindow.Rect.top - telemetryWindow.BorderWidth) * gameInterface.ratio;
     //sim.mouseTarget = telemetryWindow.Canvas;
   }
   else {
-    event.preventDefault(); event.stopPropagation();
-    //FIXED: a bug where the user can spawn a bot even when the mouse is not on 'Create FAST/SLOW BOT' buttons
+    //FIXED: a bug where the user can spawn a bot even when the mouse is not on 'Create FAST/SLOW/GENERIC/RANDOM BOT' buttons
     sim.mouseY = 0; sim.mouseY = 0;
   }
   
   switch (event.type) {
-    case "contextmenu": event.preventDefault(); event.stopPropagation(); break;
     case "mouseup": 
-      if (sim.mKey === 1 && sim.state === 1) {
-        //;
-      }
+      if (sim.mKey === 1 && sim.state === 1) {}
       break;
     case "mousedown":
       sim.mKey = event.keyCode || event.which; // || event.button; 1- left button, 2 - mid button, 3 - right button
-      event.preventDefault();
-      event.stopPropagation();
       
       //if (sim.state === 0) { //detect click on Start in main menu
         //if (sim.mKey === 1) {
@@ -691,20 +729,15 @@ function mouseEvents(event) {
         //}
       //}
       
-      if (sim.state === 1) { //get mouse click coordinates
-        if (sim.mKey === 1) { //detect start of using selection rectangle or single unit selection
-          event.preventDefault(); event.stopPropagation();
-          
+      if (sim.state === 1) { //detect click on Sim Options window
+        if (sim.mKey === 1) {
+          if (sim.mouseY > 448 && sim.mouseY < 464) { spawnBot("random", 3); }
           if (sim.mouseY > 464 && sim.mouseY < 480) { spawnBot("generic"); }
           if (sim.mouseY > 480 && sim.mouseY < 496) { spawnBot("slow"); }
-          if (sim.mouseY > 496) { spawnBot("fast"); }
+          if (sim.mouseY > 496 && sim.mouseY < 512) { spawnBot("fast"); }
         }
-        if (sim.mKey === 2) { //detect mid button click for map scroll
-          event.preventDefault(); event.stopPropagation();
-        }
-        if (sim.mKey === 3) { //detect right button click
-          event.preventDefault(); event.stopPropagation();
-        }
+        if (sim.mKey === 2) {} //detect mid button click for map scroll
+        if (sim.mKey === 3) {} //detect right button click
       }
       
       //if (sim.state === 2) { //detects click on Exit or Resume in main menu
@@ -716,7 +749,7 @@ function mouseEvents(event) {
               //sim.bots = [];
               //sim.runningBots = 0;
               //sim.startTime = 0;
-              //spawnBots();
+              //spawnBot("random", 3);
               //sim.state = 1;
               //main();
               //break;
@@ -751,7 +784,7 @@ function mouseEvents(event) {
 
 //clear racetrack and telemetry windows before each frame is drawn
 function clearFrame() {
-  //resetting the matrix BEFORE clearing the viewport!!!
+  //reset the matrix BEFORE clearing the viewport!!!
   racetrackWindow.Context.setTransform(1,0,0,1,0,0); //reset the transform matrix as it is cumulative
   /* ------------------------------------------------------------------------ */
   racetrackWindow.Context.clearRect(0, 0, racetrackWindow.CanvasWidth, racetrackWindow.CanvasHeight); //clear the viewport ONLY IF the matrix is reset
@@ -784,11 +817,14 @@ function drawRacetrack() {
 
 //draw our bots
 function drawUnits(passDeltaTime) {
-  var optiInterp = 1 - passDeltaTime; //small optimization
+  var optiInterp = 1 - passDeltaTime; //PERFOPT: small optimization
   var botsCount = sim.bots.length;
   for (var i = 0; i < botsCount; i++) {
-    sim.bots[i].destination.x = targets[sim.bots[i].target].x;
-    sim.bots[i].destination.y = targets[sim.bots[i].target].y;
+    //dunno why I placed these 3 lines here, but seems they are not needed, so commented them out
+    //TODO: delete them if no new bugs appear
+    //sim.bots[i].destination.x = targets[sim.bots[i].target].x;
+    //sim.bots[i].destination.y = targets[sim.bots[i].target].y;
+    //sim.bots[i].destination.z = targets[sim.bots[i].target].z;
     var drawX = (sim.bots[i].position.x * passDeltaTime) + (sim.bots[i].position.x * optiInterp), drawY = (sim.bots[i].position.y * passDeltaTime) + (sim.bots[i].position.y * optiInterp); //interpolation
     drawX = halfWidth + drawX; drawY = halfHeight - drawY; //translation from cartesian to screen coords
     racetrackWindow.Context.beginPath();
@@ -808,7 +844,7 @@ function drawUnits(passDeltaTime) {
                                       sim.bots[i].size, //The ellipse's major-axis radius or X radius
                                       sim.bots[i].size, //The ellipse's minor-axis radius or Y radius
                                       //TODO: Fix the wrong rotation heading below
-                                      sim.bots[i].heading * Deg2Rad, //The rotation for this ellipse, expressed in radians; This rotates our bot, converted to radians because ellipse() uses radians
+                                      sim.bots[i].heading, //The rotation for this ellipse, which uses Radians as parameter
                                       0, //The starting point, measured from the x axis, from which it will be drawn, expressed in radians
                                       TAU, //The end ellipse's angle to which it will be drawn, expressed in radians
                                       false); //if true, draws the ellipse anticlockwise (counter-clockwise), otherwise in a clockwise direction
@@ -816,7 +852,7 @@ function drawUnits(passDeltaTime) {
       racetrackWindow.Context.stroke();
       //racetrackWindow.Context.fillStyle = "black";
       //racetrackWindow.Context.font = "14px Arial"; //1em = 16px
-     // racetrackWindow.Context.textBaseline = "alphabetic";
+      //racetrackWindow.Context.textBaseline = "alphabetic";
       //if (sim.showUnitStats === true) {
         //racetrackWindow.Context.lineWidth = 3;
         //racetrackWindow.Context.strokeStyle = "white";
@@ -851,17 +887,17 @@ function drawStats() {
   var textSize = 12; //1em = 16px, 12px = 1em*0.75 or 16px*0.75
   
   for (var i = 0; i < gameBotsLen; i++) {
-    screenStats.push(["[bot " +                               sim.bots[i].id + "]", 
-                      //"    posX: " +                 parseInt(sim.bots[i].position.x), 
-                      //"    posY: " +                 parseInt(sim.bots[i].position.y), 
-                      //"    posZ: " +                 parseInt(sim.bots[i].position.z), 
-                      //"    destinationX: " +         parseInt(sim.bots[i].destination.x), 
-                      //"    destinationY: " +         parseInt(sim.bots[i].destination.y),
-                      //"    destinationZ: " +         parseInt(sim.bots[i].destination.z),
-                      "    target: ring " +                  (sim.bots[i].target + 1), 
-                      "    active: " +                        sim.bots[i].state, 
-                      //"    XYangle: " +                       sim.bots[i].targetAngleXY.toFixed(3), 
-                      //"    Zangle: " +                        sim.bots[i].targetAngleZ.toFixed(3), 
+    screenStats.push(["[bot " +                    sim.bots[i].id + "]", 
+                      //"    posX: " +             parseInt(sim.bots[i].position.x), 
+                      //"    posY: " +             parseInt(sim.bots[i].position.y), 
+                      //"    posZ: " +             parseInt(sim.bots[i].position.z), 
+                      //"    destinationX: " +     parseInt(sim.bots[i].destination.x), 
+                      //"    destinationY: " +     parseInt(sim.bots[i].destination.y),
+                      //"    destinationZ: " +     parseInt(sim.bots[i].destination.z),
+                      "    target: ring " +        (sim.bots[i].target + 1), 
+                      "    active: " +             sim.bots[i].state, 
+                      //"    XYangle: " +          sim.bots[i].targetAngleXY.toFixed(3), 
+                      //"    Zangle: " +           sim.bots[i].targetAngleZ.toFixed(3), 
                       "    speed: " +              parseFloat(sim.bots[i].speed).toFixed(3) + " m/s",
                       "    fuel: " +               parseFloat(sim.bots[i].fuel).toFixed(3) + " litres",
                       "    weight: " +             parseFloat(sim.bots[i].loadedMass).toFixed(3) + " kgs",
@@ -871,8 +907,12 @@ function drawStats() {
                       "    roll: " +               parseFloat(sim.bots[i].roll).toFixed(3),
                       "    yaw: " +                parseFloat(sim.bots[i].yaw).toFixed(3),
                       "    lift force: " +         parseFloat(sim.bots[i].liftForce).toFixed(3),
+                      "    drag force: " +         parseFloat(sim.bots[i].dragForce).toFixed(3),
                       "    distance travelled: " + parseFloat(sim.bots[i].distanceTravelled).toFixed(3),
-                      "    time: " +              parseFloat((sim.bots[i].time*0.001)/sim.timeScale).toFixed(3) + " sec"]);
+                      "    distance from target: " + parseFloat(sim.bots[i].distance).toFixed(3),
+                      "    target number: " +      sim.bots[i].target + " of " + targetCount,
+                      "    next target: " +        (parseFloat(sim.bots[i].target) + 1),
+                      "    time: " +               parseFloat((sim.bots[i].time*0.001)/sim.timeScale).toFixed(3) + " sec"]);
   }
   
   var screenStatsLen = screenStats.length;
@@ -903,7 +943,9 @@ function drawEngineInfo() {
     var minVal = Infinity;
     //var maxVal = 0;
     //var heapLimit = performance.memory.jsHeapSizeLimit / 1048576; //this will be used for the graph
-    minVal = min(minVal, performance.memory.usedJSHeapSize / 1048576);
+    if (isChromium == true) { //IMPORTANT: performance.memory is supported only by Chromium
+      minVal = min(minVal, performance.memory.usedJSHeapSize / 1048576);
+    } else { minVal = 1; }
     //maxVal = min(maxVal, performance.memory.usedJSHeapSize / 1048576);
     sim.currentMem = round(minVal); // | " + round(minVal) + " MB | " + round(maxVal) + " MB";
     racetrackWindow.Context.fillStyle = "white";
@@ -911,9 +953,10 @@ function drawEngineInfo() {
     racetrackWindow.Context.textBaseline = "alphabetic";
     racetrackWindow.Context.fillText("FPS: " + sim.currentFPS, 4, 16); //FPS, 4px offset from top left corner
     racetrackWindow.Context.fillText("World updates: " + parseInt(sim.worldUpdates), 4, 32); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Render time (in ms): " + sim.renderTime, 4, 48); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Update time (in ms): " + sim.updateTime, 4, 64); //ms, 4px offset from top left corner
-    racetrackWindow.Context.fillText("Memory usage (in MB): " + sim.currentMem, 4, 80); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Bots: " + sim.bots.length, 4, 48); //bot counter, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Render time (in ms): " + sim.renderTime, 4, 64); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Update time (in ms): " + sim.updateTime, 4, 80); //ms, 4px offset from top left corner
+    racetrackWindow.Context.fillText("Memory usage (in MB): " + sim.currentMem, 4, 96); //ms, 4px offset from top left corner
   }
 }
 
@@ -943,14 +986,25 @@ function drawMenus(menuEvent) {
       simOptionsWindow.Context.clearRect(0, 0, simOptionsWindow.CanvasWidth, simOptionsWindow.CanvasHeight);
       simOptionsWindow.Context.font = menuFont;
       for (var i = 0; i < screenMenus.length; i++) {
-        simOptionsWindow.Context.fillStyle = "DarkBlue";
+        if (screenMenus[i] === "CREATE GENERIC BOT") {
+          simOptionsWindow.Context.fillStyle = "Black";
+        }
+        else if (screenMenus[i] === "CREATE FAST BOT") {
+          simOptionsWindow.Context.fillStyle = "Red";
+        }
+        else if (screenMenus[i] === "CREATE SLOW BOT") {
+          simOptionsWindow.Context.fillStyle = "Green";
+        }
+        else if (screenMenus[i] === "CREATE RANDOM BOTS") {
+          simOptionsWindow.Context.fillStyle = "Blue";
+        }
         simOptionsWindow.Context.fillRect(0, simOptionsWindow.CanvasHeight - (menuHeight*(1+i)), simOptionsWindow.CanvasWidth, menuHeight);
         simOptionsWindow.Context.fillStyle = "white";
         simOptionsWindow.Context.textBaseline = "top";
         simOptionsWindow.Context.textAlign = "center";
-        simOptionsWindow.Context.fillText(screenMenus[i], simOptionsWindow.CanvasWidth / 2, simOptionsWindow.CanvasHeight - (menuHeight*(1+i)));
+        simOptionsWindow.Context.fillText(screenMenus[i], simOptionsWindow.CanvasWidth / 2, simOptionsWindow.CanvasHeight - (menuHeight*(1+i) - 2));
       }
-      //racetrack length is moved here to lower clutter in racetrack window
+      //racetrack length is moved here to lower the text clutter in racetrack window
       simOptionsWindow.Context.fillText("Racetrack length (in m): " + parseFloat(sim.racetrackLength).toFixed(3), simOptionsWindow.CanvasWidth / 2, 4); //ms, 4px offset from top left corner
       break; //running
     //case 2: //finished or paused, whatever i can't fight this logic right now
@@ -1080,27 +1134,49 @@ function renderWorld(passDeltaTime) { //drawing order of our objects: map->units
 /* -------------------------------------------------------------------------- */
 
 // these vars are for FIX-YOUR-TIMESTEP solution
-/*var t = 0;
+//exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
+//currentState and previousState maybe are current and previous position of our bots, in fact idk
+/*
+var t = 0;
 var dt = 0.01;
 var accumulator = 0;
 var previousState = 0;
 var currentState = 0;
 var state = 0;
-sim.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution*/
+sim.currentTime = performance.now().toFixed(3); //gets the current time needed for FIX-YOUR-TIMESTEP solution
+
+function main() {
+  if (sim.runningBots > 0) {
+    requestAnimationFrame(main);
+  
+    while (true) {
+      var newTime = performance.now();
+      var frameTime = (newTime - sim.currentTime)*0.001;
+      
+      if (frameTime > dt) {
+        frameTime = dt;
+        currentTime = newTime;
+      }
+      
+      accumulator += frameTime;
+      
+      while (accumulator >= dt) {
+        previousState = currentState;
+        updateWorld(); //update the world
+        t += dt;
+        accumulator -= dt;
+      }
+      
+      var alpha = accumulator / dt;
+      
+      renderWorld(dt / (currentState * alpha + previousState * (1.0 - alpha)));
+    }
+  } else { requestAnimationFrame(main); }
+}*/
 
 //engine's main loop
 function main() {
-  /*if (sim.state === 0) { //draw menus if the game is not running
-    sim.botIdCounter = 0; 
-    sim.bots = [];
-    sim.runningBots = 0;
-    sim.startTime = 0;
-    drawMenus(0);
-    return;
-  }*/
-  
   if (sim.runningBots > 0) {
-    //if (sim.runningBots === 0) { sim.timeStep = 10; } else { sim.timeStep = 0.01667; }
     requestAnimationFrame(main); //first step is to draw so first update will be always drawn
     sim.currentTime = performance.now(); //get the current time needed for our engine
     sim.timeDiff = (abs(sim.currentTime - sim.lastTime) * 0.001);
@@ -1120,45 +1196,17 @@ function main() {
     sim.lastTime = sim.currentTime;
   } else { requestAnimationFrame(main); }
   
-  //exact copy of http://gafferongames.com/game-physics/fix-your-timestep/
-  //currentState and previousState maybe are current and previous position of our bots, in fact idk
-  /*if (sim.state === 1) {
-    var newTime = performance.now().toFixed(3);
-    var frameTime = newTime - sim.currentTime;
-    
-    if (frameTime > dt) {
-      frameTime = dt;
-      currentTime = newTime;
-    }
-    
-    accumulator += frameTime;
-    
-    while (accumulator >= dt) {
-      previousState = currentState;
-      updateWorld(currentState, t, dt);
-      t += dt;
-      accumulator -= dt;
-    }
-    
-    var alpha = accumulator / dt;
-    
-    state = currentState * alpha + previousState * (1.0 - alpha);
-    
-    renderWorld(state);
-
-    requestAnimationFrame(main);
-  }*/
-  
   //if (sim.state === 2) { drawMenus(2); return; } //draw menus if the game is paused
 }
 
 //load all event listeners and our engine when the page is loaded
 document.body.onload = function() {
-  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detect pressed keys
-  window.addEventListener('contextmenu', function(event){mouseEvents(event)}, false); //disable right-click menu in canvas
-  window.addEventListener('mousedown', function(event){mouseEvents(event)}, false); //detect pressed mouse buttons
-  window.addEventListener('mousemove', function(event){mouseEvents(event)}, false); //detect mouse movement
-  window.addEventListener('mouseup', function(event){mouseEvents(event)}, false); //detect realeased mouse buttons
+  //disable right-click in canvas and detect mouse movement and pressed/released mouse buttons
+  var mEvents = ['contextmenu', 'mousedown', 'mouseup', 'mousemove'];
+  for (var i = 0; i < mEvents.length; i++) {
+    window.addEventListener(mEvents[i], function(event){mouseEvents(event)}, false); //disable right-click menu in canvas
+  }
+  window.addEventListener('keydown', function(event){detectKeys(event)}, false); //detect pressed keyboard keys
   drawMenus(1);
   main(); //and finally let's load our engine
 };
@@ -1173,5 +1221,6 @@ document.body.onload = function() {
 6. Aftermath statistics
 7. Sim controls
 8. To learn the retarded Git commands. Do not forget your passphrase, folks!
+9. Check if everything related to angles to be in Radians (because Math)
 */
 /* ------------------------------- TODO SECTION ----------------------------- */

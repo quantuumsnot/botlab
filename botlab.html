@@ -25,10 +25,8 @@ body { margin: 0px; width: 100%; height: 100%; background-color: black; color: w
   -ms-interpolation-mode: nearest-neighbor;   /* IE */
 }-->
 #racetrackWindow { position: absolute; top: 0px; left: 0px; border: 1px solid white; background-color: black; transform: translate3d(0,0,0); }
-#simOptionsWindow { position: absolute; top: 0px; left: 512px; border: 1px solid white; /*z-index: 10*/; background-color: black; transform: translate3d(0,0,0); }
-#telemetryWindow { position: absolute; top: 0px; right: 0px; border: 1px solid white; /*z-index: 10*/; background-color: black; transform: translate3d(0,0,0); }
-/*#fpswrapper { position: absolute; bottom: 0px; right: 0px; transform: translate3d(0,0,0); }*/
-#buttons { position: absolute; bottom: 0px; left: 0px; border: 1px solid white; }
+#simOptionsWindow { position: absolute; top: 0px; left: 512px; border: 1px solid white; background-color: black; transform: translate3d(0,0,0); }
+#telemetryWindow { position: absolute; top: 0px; right: 0px; border: 1px solid white; background-color: black; transform: translate3d(0,0,0); }
 .racetrackCaption { position: absolute; top: 520px; left: 0px; }
 .simOptionsCaption { position: absolute; top: 520px; left: 605px; text-align: center; }
 .telemetryCaption { position: absolute; top: 520px; right: 0px; }
@@ -37,6 +35,7 @@ table th, table tr, table td { padding: 0; margin: 0; transform: translate3d(0,0
 td div { float: left; width: 58px; border: 1px solid white; color: white; text-align: center; transform: translate3d(0,0,0); }
 td div:hover { background-color: white; color: black; cursor: pointer; transform: translate3d(0,0,0); }
 </style>
+<script src='bots.js'></script>
 <script>
 var scripts = ['engine.js'];
 var src, script;
@@ -93,12 +92,7 @@ while (src = scripts.shift()) {
 <canvas id="telemetryWindow" width="512" height="512">Your browser doesn't support HTML5 Canvas</canvas>
 <div class="telemetryCaption">Telemetry</div>
 </div>
-<!--<div id="fpswrapper"></div>-->
-<!--<div id="buttons">
-<button type="button">Start/Stop</button>
-<button type="button">Add bot</button>
-</div>
-</body>-->
+</body>
 <!-- Load script below here so it doesn't block rendering -->
 <!--<script src="engine.js"></script> -->
 </html>
